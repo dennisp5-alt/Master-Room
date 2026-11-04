@@ -10,8 +10,8 @@ android {
         applicationId 'com.dennis.masterroom.trial'
         minSdk 29
         targetSdk 34
-        versionCode 3
-        versionName '0.3.0-trial'
+        versionCode 4
+        versionName '0.4.0-studio-trial'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
