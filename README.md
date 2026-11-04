@@ -29,4 +29,6 @@ resampling and awkward files. `tools/measure.py` re-measures masters with ffmpeg
 `tools/make_song.py` makes a synthetic test song, which is useful for measuring and useless for
 judging sound.
 
-Tuning still to be done by ear: the built-in tone curve, colour amounts, take settings.
+Tuning still to be done by ear: the built-in tone curve, colour amounts, take settings, and how
+much of the peak work the clipper should take (set on Brand New Boots: up to 2 dB of the ordinary
+peak level, 2.5 dB on Punch).

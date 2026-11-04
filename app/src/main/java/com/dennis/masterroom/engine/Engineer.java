@@ -11,14 +11,14 @@ import java.util.Locale;
  */
 public final class Engineer {
     public enum Take {
-        CLEAN("Clean", "Transparent path: no colour, light compression", 0.5, 0, 0, 0, 30, 1.0, 1.0),
-        WARM("Warm", "Transformer, tape and valve path, medium compression", 0.8, 0.5, 0.35, 0.5, 30, 1.0, 1.2),
-        PUNCH("Punch", "Slower attack lets drums through, more of the peaks go to the clipper", 1.0, 0.35, 0.2, 0.2, 45, 0.7, 2.0);
+        CLEAN("Clean", "Transparent path: no colour, light compression", 0.5, 0, 0, 0, 30, 1.0, 2.0, 0.6),
+        WARM("Warm", "Transformer, tape and valve path, medium compression", 0.8, 0.5, 0.35, 0.5, 30, 1.0, 2.0, 0.6),
+        PUNCH("Punch", "Slower attack lets drums through, more of the peaks go to the clipper", 1.0, 0.35, 0.2, 0.2, 45, 0.7, 2.5, 0.7);
         public final String label, about;
-        final double compressDb, valve, iron, tape, attackMs, rides, maxClipDb;
-        Take(String label, String about, double compressDb, double valve, double iron, double tape, double attackMs, double rides, double maxClipDb) {
+        final double compressDb, valve, iron, tape, attackMs, rides, maxClipDb, clipPortion;
+        Take(String label, String about, double compressDb, double valve, double iron, double tape, double attackMs, double rides, double maxClipDb, double clipPortion) {
             this.label = label; this.about = about; this.compressDb = compressDb; this.valve = valve; this.iron = iron;
-            this.tape = tape; this.attackMs = attackMs; this.rides = rides; this.maxClipDb = maxClipDb;
+            this.tape = tape; this.attackMs = attackMs; this.rides = rides; this.maxClipDb = maxClipDb; this.clipPortion = clipPortion;
         }
     }
 
@@ -220,7 +220,7 @@ public final class Engineer {
     private static Stack stack(int rate, double gainDb, double robustDb, double ceilingDb, Take take) {
         double peak = robustDb + gainDb;
         double excess = Math.max(0, peak - ceilingDb);
-        double clipShare = Math.min(take.maxClipDb, 0.5 * excess);
+        double clipShare = Math.min(take.maxClipDb, take.clipPortion * excess);
         return new Stack(rate, gainDb, Math.max(ceilingDb, peak - clipShare), clipShare, ceilingDb);
     }
 
