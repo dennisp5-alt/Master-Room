@@ -3,17 +3,18 @@ package com.dennis.masterroom.ui;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 
-/** The Console look: colours, type and the few shapes every screen shares. */
+/** The studio look: colours, type and the surfaces every screen shares. */
 final class Look {
-    static final int BG = 0xFF16171A, PANEL = 0xFF202226, RAISED = 0xFF2A2C31, WELL = 0xFF0E0F11, LINE = 0xFF33363C;
-    static final int TEXT = 0xFFEFEAE2, MID = 0xFFC8C6C0, DIM = 0xFFA4A7AD, BAR = 0xFF5A5D64;
-    static final int AMBER = 0xFFF4A93B, BLUE = 0xFF6FB7E8, FACE = 0xFFF6DFAE, FACE_INK = 0xFF1D1B18, FACE_DIM = 0xFF4A4336, HOT = 0xFFB3261E;
+    static final int BG = 0xFF121316, PANEL = 0xFF1E2024, PANEL_TOP = 0xFF2A2C31, RAISED = 0xFF2C2E34, WELL = 0xFF0A0B0D;
+    static final int LINE = 0xFF3F4249, HAIR = 0xFF2D2F35, TEXT = 0xFFEFEAE2, MID = 0xFFCBC8C1, DIM = 0xFFA8ABB1;
+    static final int AMBER = 0xFFF2B04A, GOLD_HI = 0xFFF8C76F, GOLD_LO = 0xFFDF9A30, AMBER_DIM = 0xFF8A6A33, BLUE = 0xFF7CBDEB, HOT = 0xFFE0694F;
 
     static Typeface body, strong, label, title, mono;
     private static float density = 1;
@@ -53,8 +54,22 @@ final class Look {
         return d;
     }
 
+    /** A brushed-metal rack surface: a slight top-to-bottom fall with a fine edge. */
+    static GradientDrawable metal(float radiusDp) {
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{PANEL_TOP, PANEL});
+        d.setCornerRadius(dp(radiusDp));
+        d.setStroke(Math.max(1, dp(1)), LINE);
+        return d;
+    }
+
+    static GradientDrawable gold(float radiusDp) {
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{GOLD_HI, GOLD_LO});
+        d.setCornerRadius(dp(radiusDp));
+        return d;
+    }
+
     /** Touch feedback on a flat surface. */
-    static void surface(View v, GradientDrawable shape) {
+    static void surface(View v, Drawable shape) {
         v.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), shape, null));
     }
 
@@ -69,11 +84,13 @@ final class Look {
         b.setStateListAnimator(null);
         b.setMinWidth(0);
         b.setMinimumWidth(0);
+        b.setMinHeight(dp(48));
+        b.setMinimumHeight(dp(48));
         b.setPadding(dp(8), 0, dp(8), 0);
     }
 
     static void enable(View v, boolean on) {
         v.setEnabled(on);
-        v.setAlpha(on ? 1f : 0.4f);
+        v.setAlpha(on ? 1f : 0.45f);
     }
 }

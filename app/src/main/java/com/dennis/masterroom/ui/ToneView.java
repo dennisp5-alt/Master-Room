@@ -16,6 +16,7 @@ final class ToneView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private double[] source, take;
+    private String takeName = "";
     private boolean hidden;
 
     ToneView(Context c) {
@@ -36,15 +37,15 @@ final class ToneView extends View {
         return out;
     }
 
-    void show(double[] source, double[] take, boolean hidden) {
-        this.source = source; this.take = take; this.hidden = hidden;
+    void show(double[] source, double[] take, String takeName, boolean hidden) {
+        this.source = source; this.take = take; this.takeName = takeName; this.hidden = hidden;
         invalidate();
     }
 
     private float x(int band) { return Look.dp(8) + (band - FIRST) * (getWidth() - Look.dp(16f)) / (float) (LAST - FIRST); }
 
     private float y(double db) {
-        float top = Look.dp(6), plot = getHeight() - Look.dp(26);
+        float top = Look.dp(26), plot = getHeight() - Look.dp(48);
         double v = Math.max(BOTTOM, Math.min(TOP, db));
         return top + (float) ((TOP - v) / (TOP - BOTTOM)) * plot;
     }
@@ -60,6 +61,14 @@ final class ToneView extends View {
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setColor(color);
         c.drawPath(path, paint);
+    }
+
+    private float legend(Canvas c, float x, int color, String name) {
+        paint.setColor(color);
+        c.drawRect(x, Look.dp(10), x + Look.dp(14), Look.dp(13), paint);
+        paint.setColor(Look.MID);
+        c.drawText(name, x + Look.dp(19), Look.dp(16), paint);
+        return x + Look.dp(19) + paint.measureText(name) + Look.dp(14);
     }
 
     @Override protected void onDraw(Canvas c) {
@@ -88,5 +97,11 @@ final class ToneView extends View {
         int[] marks = {4, 10, 17, 24};
         String[] names = {"50", "200", "1k", "5k"};
         for (int i = 0; i < marks.length; i++) c.drawText(names[i], x(marks[i]), getHeight() - Look.dp(4), paint);
+        paint.setTypeface(Look.body);
+        paint.setTextSize(Look.dp(13));
+        paint.setTextAlign(Paint.Align.LEFT);
+        float at = legend(c, Look.dp(4), Look.BLUE, "Source");
+        if (take != null) at = legend(c, at, Look.AMBER, takeName);
+        legend(c, at, Look.DIM, "Target");
     }
 }

@@ -5,7 +5,6 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
-import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -18,7 +17,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -54,32 +52,38 @@ import java.util.concurrent.Executors;
 /** Session screen: load, choose, master. Compare screen: listen, decide, save. */
 public final class MainActivity extends Activity {
     private static final int PICK_SONG = 1, PICK_REFERENCE = 2, PICK_MASTER = 3;
+    private static final int BARS = 120, BLIND_OFF = 0, BLIND_ON = 1, BLIND_RESULTS = 2;
     private static final double[] LEVELS = {-14, -12, -11, -10};
     private static final String[] STAGES = {"EQ", "DYN", "COMP", "TONE", "CLIP", "LIMIT"};
-    private static final int MATCH = LinearLayout.LayoutParams.MATCH_PARENT, WRAP = LinearLayout.LayoutParams.WRAP_CONTENT;
 
+    /** One version in the comparison. Numbers are always measured, never estimated. */
     private static final class Item {
-        final String name; final double lufs, lra; final double[] mid; final File[] files;
-        Item(String name, double lufs, double lra, double[] mid, File[] files) {
-            this.name = name; this.lufs = lufs; this.lra = lra; this.mid = mid; this.files = files;
+        final String name; final double lufs, lra, truePeak; final double[] mid; final float[] bars; final File[] files;
+        boolean saved;
+        Item(String name, Listen l, float[] bars, File[] files) {
+            this.name = name; lufs = l.loudness.integrated; lra = l.loudness.lra; truePeak = l.truePeakDb;
+            mid = l.midDb; this.bars = bars; this.files = files;
         }
     }
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AbPlayer player = new AbPlayer();
+    private Parts parts;
 
     private ScrollView sessionScreen, compareScreen;
     private LinearLayout column, styleRow, levelRow, versionList;
-    private TextView songName, songMeta, songAction, referenceLine, statusLine, sheetText, timeNow, timeEnd;
-    private Button compareLink, masterButton, saveButton, importButton, sheetButton, waveTab, toneTab;
+    private TextView songName, songMeta, songAction, measuredLufs, measuredPeak, measuredRange, ceilingLine;
+    private TextView referenceLine, statusLine, sheetText, selectedName, timeNow, matchLine, matchState, blindLine, blindState;
+    private Button compareLink, masterButton, takeButton, importButton, waveTab, toneTab, matchButton, blindButton;
     private ImageButton playButton;
+    private ImageView sheetChevron;
     private ProgressBar progress;
     private MeterView meter;
     private WaveView wave;
     private ToneView tone;
-    private CheckBox blind;
     private final View[] leds = new View[STAGES.length];
+    private final boolean[] stageDone = new boolean[STAGES.length];
 
     private Target.Style style = Target.Style.COUNTRY;
     private double level = -14;
@@ -87,15 +91,17 @@ public final class MainActivity extends Activity {
     private String song = "song";
     private final List<Item> items = new ArrayList<>();
     private final List<Integer> order = new ArrayList<>();
-    private int selected;
+    private int selected, blind = BLIND_OFF, pickedShown = -1;
+    private boolean matchBeforeBlind = true, saving, working;
     private double[] targetMid;
     private File sessionDir;
     private String sheet = "";
-    private boolean working;
+    private volatile int measureToken;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         Look.load(this);
+        parts = new Parts(this);
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Look.BG);
         sessionScreen = buildSession();
@@ -105,6 +111,9 @@ public final class MainActivity extends Activity {
         root.addView(compareScreen);
         setContentView(root);
         refreshReferences();
+        refreshCeiling();
+        lightPath(-1);
+        refreshCompare();
         main.postDelayed(this::tick, 100);
     }
 
@@ -119,13 +128,11 @@ public final class MainActivity extends Activity {
         else super.onBackPressed();
     }
 
+    /** Moving between screens leaves playback, the selected take and any render running. */
     private void showCompare(boolean on) {
-        if (!on) { player.pause(); }
         compareScreen.setVisibility(on ? View.VISIBLE : View.GONE);
         sessionScreen.setVisibility(on ? View.GONE : View.VISIBLE);
     }
-
-    // Parts -------------------------------------------------------------------
 
     private ScrollView screen() {
         ScrollView s = new ScrollView(this);
@@ -133,171 +140,108 @@ public final class MainActivity extends Activity {
         s.setFillViewport(true);
         column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
-        column.setPadding(Look.dp(16), Look.dp(16), Look.dp(16), Look.dp(28));
+        column.setPadding(Look.dp(14), Look.dp(12), Look.dp(14), Look.dp(28));
         s.addView(column);
         return s;
-    }
-
-    private LinearLayout.LayoutParams line(int height, int topDp) {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(MATCH, height);
-        p.topMargin = Look.dp(topDp);
-        return p;
-    }
-
-    private TextView text(String s, Typeface face, float sp, int color) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        Look.type(t, face, sp, color);
-        return t;
-    }
-
-    private void heading(String s) {
-        TextView t = text(s, Look.label, 15, Look.DIM);
-        t.setLetterSpacing(0.12f);
-        column.addView(t, line(WRAP, 16));
-    }
-
-    private Button button(String s, int fill, int ink, View.OnClickListener click) {
-        Button b = new Button(this);
-        Look.flat(b);
-        b.setText(s);
-        Look.type(b, Look.label, 17, ink);
-        Look.surface(b, Look.shape(fill, fill == Look.PANEL ? Look.LINE : 0, 5));
-        b.setOnClickListener(click);
-        return b;
-    }
-
-    private Button bigButton(String s, int fill, View.OnClickListener click) {
-        Button b = button(s, fill, Look.BG, click);
-        Look.type(b, Look.title, 22, Look.BG);
-        b.setLetterSpacing(0.12f);
-        return b;
-    }
-
-    private Button chip(String s, boolean on, Typeface face, View.OnClickListener click) {
-        Button b = button(s, on ? Look.AMBER : Look.PANEL, on ? Look.BG : Look.TEXT, click);
-        Look.type(b, face, 16, on ? Look.BG : Look.TEXT);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, Look.dp(46), 1);
-        p.setMargins(Look.dp(3), 0, Look.dp(3), 0);
-        b.setLayoutParams(p);
-        return b;
-    }
-
-    private LinearLayout row() {
-        LinearLayout r = new LinearLayout(this);
-        r.setOrientation(LinearLayout.HORIZONTAL);
-        r.setGravity(Gravity.CENTER_VERTICAL);
-        return r;
-    }
-
-    private View grow() {
-        View v = new View(this);
-        v.setLayoutParams(new LinearLayout.LayoutParams(0, 1, 1));
-        return v;
     }
 
     // Session screen ----------------------------------------------------------
 
     private ScrollView buildSession() {
         ScrollView s = screen();
-        LinearLayout header = row();
+        LinearLayout header = parts.row();
         ImageView mark = new ImageView(this);
         mark.setImageResource(R.drawable.ic_mark);
         mark.setContentDescription("Master Room");
         header.addView(mark, new LinearLayout.LayoutParams(Look.dp(30), Look.dp(30)));
-        TextView name = text("MASTER ROOM", Look.title, 22, Look.TEXT);
+        TextView name = parts.text("MASTER ROOM", Look.title, 22, Look.TEXT);
         name.setLetterSpacing(0.14f);
         name.setPadding(Look.dp(10), 0, 0, 0);
         header.addView(name);
-        header.addView(grow());
-        compareLink = new Button(this);
-        Look.flat(compareLink);
-        compareLink.setText("COMPARE");
-        Look.type(compareLink, Look.label, 16, Look.AMBER);
-        compareLink.setLetterSpacing(0.08f);
-        compareLink.setBackground(null);
+        header.addView(parts.grow());
+        compareLink = parts.link("COMPARE", v -> showCompare(true));
         compareLink.setVisibility(View.GONE);
-        compareLink.setOnClickListener(v -> showCompare(true));
-        header.addView(compareLink, new LinearLayout.LayoutParams(WRAP, Look.dp(44)));
-        column.addView(header, line(Look.dp(44), 0));
+        header.addView(compareLink, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
+        column.addView(header, Parts.line(Look.dp(48), 0));
 
-        LinearLayout card = row();
+        LinearLayout card = parts.row();
         card.setPadding(Look.dp(14), Look.dp(10), Look.dp(14), Look.dp(10));
-        Look.surface(card, Look.shape(Look.PANEL, Look.LINE, 6));
+        card.setMinimumHeight(Look.dp(64));
+        Look.surface(card, Look.metal(8));
         card.setClickable(true);
         card.setOnClickListener(v -> pick(PICK_SONG));
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
-        songName = text("No song loaded", Look.strong, 18, Look.TEXT);
+        songName = parts.text("No song loaded", Look.strong, 18, Look.TEXT);
         songName.setSingleLine(true);
-        songMeta = text("WAV, or anything the phone can play", Look.mono, 12, Look.DIM);
+        songMeta = parts.text("WAV, or anything the phone can play", Look.mono, 12, Look.DIM);
         info.addView(songName);
         info.addView(songMeta);
-        card.addView(info, new LinearLayout.LayoutParams(0, WRAP, 1));
-        songAction = text("Load", Look.strong, 15, Look.AMBER);
+        card.addView(info, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        songAction = parts.text("Load", Look.strong, 15, Look.AMBER);
         card.addView(songAction);
-        column.addView(card, line(WRAP, 8));
+        column.addView(card, Parts.line(Parts.WRAP, 6));
 
+        LinearLayout monitor = parts.panel(10, column);
+        monitor.addView(parts.label("SOURCE LOUDNESS"));
         FrameLayout well = new FrameLayout(this);
-        well.setPadding(Look.dp(10), Look.dp(10), Look.dp(10), Look.dp(10));
-        well.setBackground(Look.shape(Look.WELL, Look.LINE, 6));
+        well.setBackground(Look.shape(Look.WELL, Look.HAIR, 6));
         meter = new MeterView(this);
         well.addView(meter);
-        column.addView(well, line(WRAP, 12));
+        monitor.addView(well, Parts.line(Parts.WRAP, 6));
+        LinearLayout tiles = parts.row();
+        measuredLufs = parts.readout(tiles, "INTEGRATED", "LUFS", 0);
+        measuredPeak = parts.readout(tiles, "TRUE PEAK", "dBTP", 6);
+        measuredRange = parts.readout(tiles, "RANGE", "LU", 6);
+        monitor.addView(tiles, Parts.line(Parts.WRAP, 8));
 
-        heading("STYLE");
-        styleRow = row();
-        column.addView(styleRow, line(Look.dp(46), 6));
-        LinearLayout refs = row();
-        referenceLine = text("", Look.body, 13, Look.DIM);
-        refs.addView(referenceLine, new LinearLayout.LayoutParams(0, WRAP, 1));
-        Button add = new Button(this);
-        Look.flat(add);
-        add.setText("ADD RECORD");
-        Look.type(add, Look.label, 15, Look.AMBER);
-        add.setLetterSpacing(0.06f);
-        add.setBackground(null);
-        add.setOnClickListener(v -> pick(PICK_REFERENCE));
-        refs.addView(add, new LinearLayout.LayoutParams(WRAP, Look.dp(44)));
-        column.addView(refs, line(WRAP, 2));
+        LinearLayout stylePanel = parts.panel(10, column);
+        stylePanel.addView(parts.label("STYLE"));
+        styleRow = parts.row();
+        stylePanel.addView(styleRow, Parts.line(Look.dp(48), 6));
+        LinearLayout refs = parts.row();
+        referenceLine = parts.text("", Look.body, 13, Look.DIM);
+        refs.addView(referenceLine, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        refs.addView(parts.link("ADD RECORD", v -> pick(PICK_REFERENCE)), new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
+        stylePanel.addView(refs, Parts.line(Parts.WRAP, 2));
         drawStyles();
 
-        heading("LOUDNESS");
-        levelRow = row();
-        column.addView(levelRow, line(Look.dp(46), 6));
+        LinearLayout levelPanel = parts.panel(10, column);
+        levelPanel.addView(parts.label("TARGET LOUDNESS, LUFS"));
+        levelRow = parts.row();
+        levelPanel.addView(levelRow, Parts.line(Look.dp(48), 6));
+        ceilingLine = parts.text("", Look.mono, 12, Look.DIM);
+        levelPanel.addView(ceilingLine, Parts.line(Parts.WRAP, 8));
         drawLevels();
 
+        LinearLayout pathPanel = parts.panel(10, column);
+        pathPanel.addView(parts.label("SIGNAL PATH"));
         LinearLayout path = new LinearLayout(this);
         path.setOrientation(LinearLayout.HORIZONTAL);
-        path.setPadding(0, Look.dp(10), 0, Look.dp(10));
-        GradientDrawable rule = Look.shape(Look.BG, Look.LINE, 0);
-        path.setBackground(rule);
-        path.setContentDescription("Signal path");
         for (int i = 0; i < STAGES.length; i++) {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(Gravity.CENTER_HORIZONTAL);
             View led = new View(this);
-            led.setBackground(Look.shape(Look.AMBER, 0, 4));
             leds[i] = led;
-            cell.addView(led, new LinearLayout.LayoutParams(Look.dp(8), Look.dp(8)));
-            TextView t = text(STAGES[i], Look.label, 13, Look.MID);
+            cell.addView(led, new LinearLayout.LayoutParams(Look.dp(9), Look.dp(9)));
+            TextView t = parts.text(STAGES[i], Look.label, 14, Look.MID);
             t.setPadding(0, Look.dp(6), 0, 0);
             cell.addView(t);
-            path.addView(cell, new LinearLayout.LayoutParams(0, WRAP, 1));
+            path.addView(cell, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
         }
-        column.addView(path, line(WRAP, 16));
+        pathPanel.addView(path, Parts.line(Parts.WRAP, 8));
 
-        masterButton = bigButton("MASTER IT", Look.AMBER, v -> master());
+        masterButton = parts.gold("MASTER IT", v -> master());
         Look.enable(masterButton, false);
-        column.addView(masterButton, line(Look.dp(56), 14));
+        column.addView(masterButton, Parts.line(Look.dp(60), 12));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
         progress.setProgressTintList(ColorStateList.valueOf(Look.AMBER));
         progress.setVisibility(View.GONE);
-        column.addView(progress, line(WRAP, 8));
-        statusLine = text("", Look.body, 14, Look.DIM);
-        column.addView(statusLine, line(WRAP, 6));
+        column.addView(progress, Parts.line(Parts.WRAP, 8));
+        statusLine = parts.text("", Look.body, 14, Look.DIM);
+        column.addView(statusLine, Parts.line(Parts.WRAP, 6));
         return s;
     }
 
@@ -306,7 +250,7 @@ public final class MainActivity extends Activity {
         for (Target.Style s : Target.Style.values()) {
             final Target.Style pick = s;
             String n = s.name().charAt(0) + s.name().substring(1).toLowerCase(Locale.US);
-            styleRow.addView(chip(n, s == style, Look.strong, v -> { style = pick; drawStyles(); refreshReferences(); }));
+            styleRow.addView(parts.segment(n, s == style, Look.strong, v -> { style = pick; drawStyles(); refreshReferences(); }));
         }
     }
 
@@ -314,17 +258,73 @@ public final class MainActivity extends Activity {
         levelRow.removeAllViews();
         for (double l : LEVELS) {
             final double pick = l;
-            levelRow.addView(chip(String.format(Locale.US, "%.0f", l), l == level, Look.mono, v -> {
-                level = pick; drawLevels(); meter.setValue(pick);
+            levelRow.addView(parts.segment(String.format(Locale.US, "%.0f", l), l == level, Look.mono, v -> {
+                level = pick; drawLevels(); meter.setTarget(pick); refreshCeiling();
             }));
         }
     }
 
-    /** Lights the signal path up to the stage now running; -1 lights all of it. */
-    private void lightPath(int stage) {
+    private void refreshCeiling() {
+        ceilingLine.setText(String.format(Locale.US, "Target %.1f LUFS, true peak ceiling %.1f dBTP", level, Engineer.ceilingFor(level)));
+    }
+
+    private void showMeasured(Listen l) {
+        meter.setMeasured(l.loudness.integrated);
+        measuredLufs.setText(String.format(Locale.US, "%.1f", l.loudness.integrated));
+        measuredPeak.setText(String.format(Locale.US, "%.1f", l.truePeakDb));
+        measuredRange.setText(String.format(Locale.US, "%.1f", l.loudness.lra));
+    }
+
+    private void clearMeasured() {
+        meter.setMeasured(Double.NaN);
+        measuredLufs.setText("--"); measuredPeak.setText("--"); measuredRange.setText("--");
+    }
+
+    /** Reads the real numbers in the background; Master it never waits for this. */
+    private void measureSource(Uri uri) {
+        final int token = ++measureToken;
+        clearMeasured();
+        Thread t = new Thread(() -> {
+            try {
+                Audio a = Decoder.open(this, uri);
+                final String meta = trackMeta(a);
+                Listen l = Listen.to(a);
+                main.post(() -> {
+                    if (token != measureToken) return;
+                    songMeta.setText(meta);
+                    showMeasured(l);
+                });
+            } catch (Throwable e) {
+                main.post(() -> { if (token == measureToken) songMeta.setText("Could not measure this file"); });
+            }
+        }, "measure");
+        t.setPriority(Thread.MIN_PRIORITY);
+        t.start();
+    }
+
+    private static String trackMeta(Audio a) {
+        return String.format(Locale.US, "%s  %.1f kHz", clock(a.seconds()), a.rate / 1000.0);
+    }
+
+    /** Each LED shows only what has really run: off, done, or running now. */
+    private void lightPath(int running) {
         for (int i = 0; i < leds.length; i++) {
-            leds[i].setBackground(Look.shape(stage < 0 || i <= stage ? Look.AMBER : Look.LINE, 0, 4));
+            int color = i == running ? Look.GOLD_HI : stageDone[i] ? Look.AMBER_DIM : Look.LINE;
+            leds[i].setBackground(Look.shape(color, 0, 5));
         }
+    }
+
+    private void markStage(String step) {
+        if (step.contains("riding")) for (int i = 2; i < stageDone.length; i++) stageDone[i] = false;
+        int stage = stageOf(step);
+        stageDone[stage] = true;
+        if (stage == 5) stageDone[4] = true;
+        lightPath(stage);
+    }
+
+    private void resetPath(boolean done) {
+        java.util.Arrays.fill(stageDone, done);
+        lightPath(-1);
     }
 
     private static int stageOf(String step) {
@@ -341,137 +341,292 @@ public final class MainActivity extends Activity {
 
     private ScrollView buildCompare() {
         ScrollView s = screen();
-        LinearLayout header = row();
+        LinearLayout header = parts.row();
         ImageButton back = new ImageButton(this);
         back.setImageResource(R.drawable.ic_back);
         back.setBackground(null);
         back.setContentDescription("Back");
         back.setOnClickListener(v -> showCompare(false));
-        header.addView(back, new LinearLayout.LayoutParams(Look.dp(44), Look.dp(44)));
-        TextView title = text("COMPARE", Look.title, 22, Look.TEXT);
+        header.addView(back, new LinearLayout.LayoutParams(Look.dp(48), Look.dp(48)));
+        TextView title = parts.text("COMPARE", Look.title, 22, Look.TEXT);
         title.setLetterSpacing(0.14f);
         header.addView(title);
-        header.addView(grow());
-        TextView pill = text("LEVEL-MATCHED", Look.label, 14, Look.AMBER);
-        pill.setLetterSpacing(0.08f);
-        pill.setPadding(Look.dp(10), Look.dp(5), Look.dp(10), Look.dp(5));
-        pill.setBackground(Look.shape(Look.BG, Look.AMBER, 4));
-        header.addView(pill);
-        column.addView(header, line(Look.dp(44), 0));
+        column.addView(header, Parts.line(Look.dp(48), 0));
 
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(Look.dp(12), Look.dp(8), Look.dp(12), Look.dp(12));
-        card.setBackground(Look.shape(Look.WELL, Look.LINE, 6));
-        LinearLayout tabs = row();
-        waveTab = button("WAVE", Look.WELL, Look.TEXT, v -> showTone(false));
-        toneTab = button("TONE", Look.WELL, Look.DIM, v -> showTone(true));
-        waveTab.setLetterSpacing(0.08f);
-        toneTab.setLetterSpacing(0.08f);
-        tabs.addView(waveTab, new LinearLayout.LayoutParams(Look.dp(70), Look.dp(44)));
-        tabs.addView(toneTab, new LinearLayout.LayoutParams(Look.dp(70), Look.dp(44)));
-        tabs.addView(grow());
-        card.addView(tabs);
+        LinearLayout display = parts.panel(6, column);
+        LinearLayout tabs = parts.row();
+        waveTab = parts.segment("WAVE", true, Look.label, v -> showTone(false));
+        toneTab = parts.segment("TONE", false, Look.label, v -> showTone(true));
+        tabs.addView(waveTab);
+        tabs.addView(toneTab);
+        display.addView(tabs, Parts.line(Look.dp(48), 0));
+        FrameLayout well = new FrameLayout(this);
+        well.setPadding(Look.dp(8), Look.dp(8), Look.dp(8), Look.dp(6));
+        well.setBackground(Look.shape(Look.WELL, Look.HAIR, 6));
         wave = new WaveView(this);
         wave.setSeek(player::seek);
-        card.addView(wave, line(Look.dp(112), 4));
+        well.addView(wave, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(190)));
         tone = new ToneView(this);
         tone.setVisibility(View.GONE);
-        card.addView(tone, line(Look.dp(190), 4));
-        LinearLayout times = row();
-        timeNow = text("0:00", Look.mono, 13, Look.DIM);
-        timeEnd = text("0:00", Look.mono, 13, Look.DIM);
-        times.addView(timeNow);
-        times.addView(grow());
-        times.addView(timeEnd);
-        card.addView(times, line(WRAP, 8));
-        column.addView(card, line(WRAP, 10));
+        well.addView(tone, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(190)));
+        display.addView(well, Parts.line(Parts.WRAP, 8));
 
-        versionList = new LinearLayout(this);
-        versionList.setOrientation(LinearLayout.VERTICAL);
-        column.addView(versionList, line(WRAP, 6));
+        LinearLayout now = parts.row();
+        LinearLayout nowText = new LinearLayout(this);
+        nowText.setOrientation(LinearLayout.VERTICAL);
+        nowText.addView(parts.label("SELECTED"));
+        selectedName = parts.text("", Look.title, 24, Look.AMBER);
+        nowText.addView(selectedName);
+        now.addView(nowText, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        timeNow = parts.text("0:00 / 0:00", Look.mono, 15, Look.MID);
+        now.addView(timeNow);
+        display.addView(now, Parts.line(Parts.WRAP, 8));
 
-        importButton = button("Import Stem Lab master", Look.BG, Look.TEXT, v -> pick(PICK_MASTER));
-        Look.type(importButton, Look.body, 15, Look.TEXT);
-        GradientDrawable dash = Look.shape(Look.BG, 0, 6);
-        dash.setStroke(Look.dp(1), Look.BAR, Look.dp(5), Look.dp(4));
-        Look.surface(importButton, dash);
-        column.addView(importButton, line(Look.dp(46), 8));
-
-        LinearLayout blindRow = row();
-        blindRow.addView(text("Blind test", Look.body, 16, Look.TEXT), new LinearLayout.LayoutParams(0, WRAP, 1));
-        blind = new CheckBox(this);
-        blind.setButtonTintList(ColorStateList.valueOf(Look.AMBER));
-        blind.setContentDescription("Blind test: hide the names and shuffle");
-        blind.setOnCheckedChangeListener((b, on) -> {
-            if (on && !order.isEmpty()) { Collections.shuffle(order); player.select(order.get(selected)); }
-            drawVersions();
-        });
-        blindRow.addView(blind);
-        column.addView(blindRow, line(Look.dp(48), 4));
-
-        LinearLayout controls = row();
+        LinearLayout controls = parts.row();
+        Button back10 = parts.button("-10 s", v -> nudge(-10));
+        Look.type(back10, Look.mono, 14, Look.TEXT);
+        controls.addView(back10, Parts.share(Look.dp(56), 1, 0));
         playButton = new ImageButton(this);
         playButton.setImageResource(R.drawable.ic_play);
-        Look.surface(playButton, Look.shape(Look.TEXT, 0, 6));
+        Look.surface(playButton, Look.gold(36));
         playButton.setContentDescription("Play");
         playButton.setOnClickListener(v -> togglePlay());
-        controls.addView(playButton, new LinearLayout.LayoutParams(Look.dp(64), Look.dp(60)));
-        saveButton = bigButton("SAVE", Look.AMBER, v -> saveSelected());
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(0, Look.dp(60), 1);
-        sp.leftMargin = Look.dp(10);
-        controls.addView(saveButton, sp);
-        column.addView(controls, line(WRAP, 6));
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(Look.dp(72), Look.dp(72));
+        pp.leftMargin = Look.dp(14);
+        pp.rightMargin = Look.dp(14);
+        controls.addView(playButton, pp);
+        Button ahead10 = parts.button("+10 s", v -> nudge(10));
+        Look.type(ahead10, Look.mono, 14, Look.TEXT);
+        controls.addView(ahead10, Parts.share(Look.dp(56), 1, 0));
+        display.addView(controls, Parts.line(Parts.WRAP, 10));
 
-        sheetButton = button("Session sheet", Look.PANEL, Look.TEXT, v ->
-                sheetText.setVisibility(sheetText.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
-        Look.type(sheetButton, Look.body, 15, Look.TEXT);
-        column.addView(sheetButton, line(Look.dp(46), 12));
-        sheetText = text("", Look.body, 14, Look.MID);
+        LinearLayout match = parts.panel(10, column);
+        LinearLayout matchTop = parts.row();
+        matchTop.addView(parts.label("LEVEL MATCH"));
+        matchTop.addView(parts.grow());
+        matchState = parts.text("", Look.label, 15, Look.BG);
+        matchState.setLetterSpacing(0.1f);
+        matchState.setPadding(Look.dp(12), Look.dp(3), Look.dp(12), Look.dp(3));
+        matchTop.addView(matchState);
+        match.addView(matchTop);
+        matchLine = parts.text("", Look.body, 13, Look.MID);
+        match.addView(matchLine, Parts.line(Parts.WRAP, 6));
+        matchButton = parts.button("", v -> toggleMatch());
+        match.addView(matchButton, Parts.line(Look.dp(48), 8));
+
+        LinearLayout columns = parts.row();
+        columns.setPadding(Look.dp(12), 0, Look.dp(12), 0);
+        columns.addView(parts.label("MASTERS"), new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        addColumn(columns, parts.label("LUFS"), 60);
+        addColumn(columns, parts.label("dBTP"), 54);
+        addColumn(columns, parts.label("LRA LU"), 58);
+        column.addView(columns, Parts.line(Parts.WRAP, 14));
+        versionList = new LinearLayout(this);
+        versionList.setOrientation(LinearLayout.VERTICAL);
+        column.addView(versionList, Parts.line(Parts.WRAP, 4));
+
+        importButton = parts.button("Import Stem Lab master", v -> pick(PICK_MASTER));
+        Look.type(importButton, Look.body, 15, Look.TEXT);
+        GradientDrawable dash = Look.shape(Look.BG, 0, 8);
+        dash.setStroke(Look.dp(1), Look.AMBER_DIM, Look.dp(5), Look.dp(4));
+        Look.surface(importButton, dash);
+        column.addView(importButton, Parts.line(Look.dp(52), 6));
+
+        LinearLayout blindPanel = parts.panel(10, column);
+        LinearLayout blindTop = parts.row();
+        blindTop.addView(parts.label("BLIND TEST"));
+        blindTop.addView(parts.grow());
+        blindState = parts.text("", Look.label, 15, Look.TEXT);
+        blindState.setLetterSpacing(0.1f);
+        blindState.setPadding(Look.dp(12), Look.dp(3), Look.dp(12), Look.dp(3));
+        blindTop.addView(blindState);
+        blindPanel.addView(blindTop);
+        blindLine = parts.text("", Look.body, 13, Look.MID);
+        blindPanel.addView(blindLine, Parts.line(Parts.WRAP, 6));
+        blindButton = parts.button("", v -> blindStep());
+        blindPanel.addView(blindButton, Parts.line(Look.dp(48), 8));
+
+        takeButton = parts.gold("PICK A TAKE", v -> saveSelected());
+        column.addView(takeButton, Parts.line(Look.dp(60), 14));
+
+        LinearLayout sheetCard = parts.row();
+        sheetCard.setPadding(Look.dp(14), 0, Look.dp(8), 0);
+        sheetCard.setMinimumHeight(Look.dp(52));
+        Look.surface(sheetCard, Look.metal(8));
+        sheetCard.setClickable(true);
+        sheetCard.setContentDescription("Session Sheet");
+        sheetCard.setOnClickListener(v -> toggleSheet());
+        sheetCard.addView(parts.text("Session Sheet", Look.strong, 16, Look.TEXT), new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        sheetChevron = new ImageView(this);
+        sheetChevron.setImageResource(R.drawable.ic_chevron);
+        sheetCard.addView(sheetChevron, new LinearLayout.LayoutParams(Look.dp(36), Look.dp(36)));
+        column.addView(sheetCard, Parts.line(Parts.WRAP, 10));
+        sheetText = parts.text("", Look.body, 14, Look.MID);
+        sheetText.setPadding(Look.dp(14), Look.dp(12), Look.dp(14), Look.dp(12));
+        sheetText.setBackground(Look.shape(Look.PANEL, Look.HAIR, 8));
         sheetText.setVisibility(View.GONE);
-        column.addView(sheetText, line(WRAP, 10));
+        column.addView(sheetText, Parts.line(Parts.WRAP, 6));
         return s;
+    }
+
+    private void addColumn(LinearLayout row, TextView t, int widthDp) {
+        t.setGravity(Gravity.END);
+        row.addView(t, new LinearLayout.LayoutParams(Look.dp(widthDp), Parts.WRAP));
+    }
+
+    private void toggleSheet() {
+        boolean open = sheetText.getVisibility() != View.VISIBLE;
+        sheetText.setVisibility(open ? View.VISIBLE : View.GONE);
+        sheetChevron.setRotation(open ? 180 : 0);
     }
 
     private void showTone(boolean on) {
         wave.setVisibility(on ? View.GONE : View.VISIBLE);
         tone.setVisibility(on ? View.VISIBLE : View.GONE);
-        waveTab.setTextColor(on ? Look.DIM : Look.TEXT);
-        toneTab.setTextColor(on ? Look.TEXT : Look.DIM);
+        Look.surface(waveTab, on ? Look.shape(Look.RAISED, Look.LINE, 5) : Look.gold(5));
+        Look.surface(toneTab, on ? Look.gold(5) : Look.shape(Look.RAISED, Look.LINE, 5));
+        waveTab.setTextColor(on ? Look.TEXT : Look.BG);
+        toneTab.setTextColor(on ? Look.BG : Look.TEXT);
+    }
+
+    private void select(int shown) {
+        selected = shown;
+        player.select(order.get(shown));
+        refreshCompare();
+    }
+
+    private void toggleMatch() {
+        player.setMatched(!player.isMatched());
+        refreshCompare();
+    }
+
+    /** Start, then reveal, then finish. Names and numbers stay hidden until the reveal. */
+    private void blindStep() {
+        if (order.isEmpty()) return;
+        if (blind == BLIND_OFF) {
+            matchBeforeBlind = player.isMatched();
+            player.setMatched(true);
+            blind = BLIND_ON;
+            pickedShown = -1;
+            Collections.shuffle(order);
+            player.select(order.get(selected));
+        } else if (blind == BLIND_ON) {
+            pickedShown = selected;
+            blind = BLIND_RESULTS;
+        } else {
+            int keep = order.get(selected);
+            Collections.sort(order);
+            selected = order.indexOf(keep);
+            blind = BLIND_OFF;
+            pickedShown = -1;
+            player.setMatched(matchBeforeBlind);
+        }
+        refreshCompare();
     }
 
     private void drawVersions() {
         versionList.removeAllViews();
-        boolean hide = blind.isChecked();
+        boolean hide = blind == BLIND_ON;
         for (int i = 0; i < order.size(); i++) {
-            final int shown = i, index = order.get(i);
-            Item item = items.get(index);
+            final int shown = i;
+            Item item = items.get(order.get(i));
             boolean on = i == selected;
-            LinearLayout r = row();
-            r.setPadding(Look.dp(12), 0, Look.dp(12), 0);
-            Look.surface(r, Look.shape(on ? Look.RAISED : Look.PANEL, on ? Look.AMBER : Look.LINE, 6));
+            LinearLayout r = parts.row();
+            r.setPadding(Look.dp(12), Look.dp(6), Look.dp(12), Look.dp(6));
+            r.setMinimumHeight(Look.dp(60));
+            Look.surface(r, on ? Look.shape(Look.RAISED, Look.AMBER, 8) : Look.metal(8));
             r.setClickable(true);
-            r.setOnClickListener(v -> { selected = shown; player.select(index); drawVersions(); });
-            r.addView(text(hide ? "Version " + (i + 1) : item.name, Look.label, 21, Look.TEXT), new LinearLayout.LayoutParams(0, WRAP, 1));
-            if (!hide) {
-                TextView lufs = text(String.format(Locale.US, "%.1f LUFS", item.lufs), Look.mono, 13, Look.MID);
-                r.addView(lufs, new LinearLayout.LayoutParams(Look.dp(82), WRAP));
-                TextView lra = text(String.format(Locale.US, "%.1f LU", item.lra), Look.mono, 13, Look.DIM);
-                r.addView(lra, new LinearLayout.LayoutParams(Look.dp(62), WRAP));
+            r.setOnClickListener(v -> select(shown));
+            LinearLayout names = new LinearLayout(this);
+            names.setOrientation(LinearLayout.VERTICAL);
+            String blindName = "Version " + (i + 1);
+            names.addView(parts.text(hide ? blindName : item.name, Look.label, 20, on ? Look.AMBER : Look.TEXT));
+            if (blind == BLIND_RESULTS) {
+                names.addView(parts.text(i == pickedShown ? blindName + ", your pick" : blindName, Look.body, 12, i == pickedShown ? Look.AMBER : Look.DIM));
             }
-            View dot = new View(this);
-            dot.setBackground(Look.shape(on ? Look.AMBER : Look.LINE, 0, 6));
-            r.addView(dot, new LinearLayout.LayoutParams(Look.dp(12), Look.dp(12)));
-            versionList.addView(r, line(Look.dp(58), i == 0 ? 0 : 6));
+            r.addView(names, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+            addNumber(r, hide ? "" : number(item.lufs), 60, Look.TEXT);
+            addNumber(r, hide ? "" : number(item.truePeak), 54, Look.MID);
+            addNumber(r, hide ? "" : number(item.lra), 58, Look.MID);
+            r.setContentDescription(hide ? blindName : item.name + ", " + number(item.lufs) + " LUFS, " + number(item.truePeak)
+                    + " dBTP, " + number(item.lra) + " LU" + (on ? ", selected" : ""));
+            versionList.addView(r, Parts.line(Parts.WRAP, i == 0 ? 0 : 6));
         }
-        if (order.isEmpty()) return;
-        Item item = items.get(order.get(selected));
-        boolean canSave = !hide && item.files != null;
-        saveButton.setText(hide ? "BLIND TEST ON" : item.files != null ? "SAVE " + item.name.toUpperCase(Locale.US) : "PICK A TAKE");
-        Look.enable(saveButton, canSave);
-        double[] source = targetMid == null ? null : ToneView.againstTarget(items.get(0).mid, targetMid);
-        double[] take = targetMid == null || item == items.get(0) || item.mid == null ? null : ToneView.againstTarget(item.mid, targetMid);
-        tone.show(source, take, hide);
+    }
+
+    private static String number(double v) {
+        return Double.isNaN(v) || Double.isInfinite(v) ? "--" : String.format(Locale.US, "%.1f", v);
+    }
+
+    private void addNumber(LinearLayout row, String value, int widthDp, int color) {
+        TextView t = parts.text(value, Look.mono, 13, color);
+        t.setGravity(Gravity.END);
+        row.addView(t, new LinearLayout.LayoutParams(Look.dp(widthDp), Parts.WRAP));
+    }
+
+    /** Everything on this screen that follows the selection or the test state. */
+    private void refreshCompare() {
+        drawVersions();
+        boolean hide = blind == BLIND_ON, any = !order.isEmpty();
+        Item item = any ? items.get(order.get(selected)) : null;
+        selectedName.setText(!any ? "Nothing yet" : hide ? "Version " + (selected + 1) : item.name);
+
+        boolean matched = player.isMatched();
+        matchState.setText(matched ? "ON" : "OFF");
+        matchState.setTextColor(matched ? Look.BG : Look.TEXT);
+        matchState.setBackground(matched ? Look.gold(4) : Look.shape(Look.WELL, Look.LINE, 4));
+        matchButton.setText(matched ? "Turn level match off" : "Turn level match on");
+        Look.enable(matchButton, !hide);
+        if (hide) matchLine.setText("Held on during the blind test. Trims are hidden so they cannot give a version away.");
+        else if (!any) matchLine.setText("Evens out playback level only. Your files are never changed.");
+        else if (matched) matchLine.setText(String.format(Locale.US, "Playback trim on %s: %.1f dB. Your files are not changed.", item.name, player.trimDb(order.get(selected))));
+        else matchLine.setText("Off: each version plays at its real level, so louder ones may seem better.");
+
+        blindState.setText(blind == BLIND_OFF ? "OFF" : blind == BLIND_ON ? "ON" : "RESULTS");
+        blindState.setTextColor(blind == BLIND_OFF ? Look.TEXT : Look.BG);
+        blindState.setBackground(blind == BLIND_OFF ? Look.shape(Look.WELL, Look.LINE, 4) : Look.gold(4));
+        if (blind == BLIND_OFF) {
+            blindLine.setText("Shuffles the versions and hides their names and numbers.");
+            blindButton.setText("Start blind test");
+        } else if (blind == BLIND_ON) {
+            blindLine.setText("Listen, select the one you prefer, then reveal.");
+            blindButton.setText("Reveal results");
+        } else {
+            blindLine.setText(pickedShown >= 0 && pickedShown < order.size()
+                    ? String.format(Locale.US, "Your pick, Version %d, was %s.", pickedShown + 1, items.get(order.get(pickedShown)).name) : "");
+            blindButton.setText("End blind test");
+        }
+        Look.enable(blindButton, any);
+        Look.enable(importButton, any && !hide && !working);
+        Look.enable(playButton, any);
+
+        wave.setBars(!any ? null : hide ? items.get(0).bars : item.bars);
+        double[] source = targetMid == null || !any ? null : ToneView.againstTarget(items.get(0).mid, targetMid);
+        double[] take = targetMid == null || !any || order.get(selected) == 0 || item.mid == null ? null : ToneView.againstTarget(item.mid, targetMid);
+        tone.show(source, take, item == null ? "" : item.name, hide);
+        refreshTake(item);
+    }
+
+    private void refreshTake(Item item) {
+        boolean hide = blind == BLIND_ON;
+        boolean ready = item != null && item.files != null && !hide && !saving && !item.saved;
+        if (saving && item != null) takeButton.setText("SAVING " + item.name.toUpperCase(Locale.US));
+        else if (hide) takeButton.setText("BLIND TEST ON");
+        else if (item == null || item.files == null) takeButton.setText("PICK A TAKE");
+        else if (item.saved) takeButton.setText(item.name.toUpperCase(Locale.US) + " SAVED");
+        else takeButton.setText("SAVE " + item.name.toUpperCase(Locale.US));
+        takeButton.setEnabled(ready);
+        takeButton.setAlpha(1f);
+        if (ready) {
+            Look.surface(takeButton, Look.gold(7));
+            takeButton.setTextColor(Look.BG);
+        } else if (item != null && item.saved && !hide) {
+            takeButton.setBackground(Look.shape(Look.BG, Look.AMBER, 7));
+            takeButton.setTextColor(Look.AMBER);
+        } else {
+            takeButton.setBackground(Look.shape(Look.PANEL, Look.LINE, 7));
+            takeButton.setTextColor(Look.DIM);
+        }
     }
 
     private static String clock(double seconds) {
@@ -479,15 +634,26 @@ public final class MainActivity extends Activity {
         return String.format(Locale.US, "%d:%02d", s / 60, s % 60);
     }
 
+    private double length() {
+        return player.size() == 0 ? 0 : (double) player.get(0).header.frames / player.get(0).header.rate;
+    }
+
+    private void nudge(double seconds) {
+        double total = length();
+        if (total <= 0) return;
+        player.seek(player.fraction() + seconds / total);
+        wave.setFraction(player.fraction());
+    }
+
     private void tick() {
         if (compareScreen.getVisibility() == View.VISIBLE && player.size() > 0) {
-            double f = player.fraction();
+            double f = player.fraction(), total = length();
             if (player.isPlaying()) wave.setFraction(f);
-            double length = (double) player.get(0).header.frames / player.get(0).header.rate;
-            timeNow.setText(clock(f * length));
-            timeEnd.setText(clock(length));
-            playButton.setImageResource(player.isPlaying() ? R.drawable.ic_pause : R.drawable.ic_play);
-            playButton.setContentDescription(player.isPlaying() ? "Pause" : "Play");
+            wave.setLength(total);
+            timeNow.setText(clock(f * total) + " / " + clock(total));
+            boolean playing = player.isPlaying();
+            playButton.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
+            playButton.setContentDescription(playing ? "Pause" : "Play");
         }
         main.postDelayed(this::tick, 100);
     }
@@ -513,9 +679,11 @@ public final class MainActivity extends Activity {
         if (code == PICK_SONG) {
             songUri = uri; song = nameOf(uri);
             songName.setText(song);
-            songMeta.setText("Ready to master");
+            songMeta.setText("Measuring");
             songAction.setText("Change");
             Look.enable(masterButton, true);
+            resetPath(false);
+            measureSource(uri);
         } else if (code == PICK_REFERENCE) {
             addReference(uri);
         } else if (code == PICK_MASTER) {
@@ -539,7 +707,7 @@ public final class MainActivity extends Activity {
         String why = e instanceof OutOfMemoryError ? "The phone ran out of memory for this song" : String.valueOf(e.getMessage());
         main.post(() -> {
             busy(false);
-            lightPath(-1);
+            resetPath(false);
             statusLine.setText(why);
             if (compareScreen.getVisibility() == View.VISIBLE) Toast.makeText(this, why, Toast.LENGTH_LONG).show();
         });
@@ -560,12 +728,14 @@ public final class MainActivity extends Activity {
         final Target target = currentTarget();
         final Uri uri = songUri;
         final String name = song;
+        measureToken++;
         player.clear(); order.clear(); items.clear(); selected = 0;
+        blind = BLIND_OFF; pickedShown = -1;
+        player.setMatched(true);
         compareLink.setVisibility(View.GONE);
-        blind.setChecked(false);
-        drawVersions();
+        refreshCompare();
         busy(true);
-        lightPath(0);
+        resetPath(false);
         progress.setProgress(0);
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         final PowerManager.WakeLock lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "masterroom:render");
@@ -585,45 +755,44 @@ public final class MainActivity extends Activity {
                 final int takeCount = Engineer.Take.values().length;
                 Engineer.Progress bar = (step, p) -> {
                     int overall = takeIndex[0] < 0 ? p : 15 + (int) ((takeIndex[0] + Math.max(0, p - 20) / 80.0) * 85 / takeCount);
-                    main.post(() -> { statusLine.setText(step); progress.setProgress(overall); lightPath(stageOf(step)); });
+                    main.post(() -> { statusLine.setText(step); progress.setProgress(overall); markStage(step); });
                 };
-                final String meta = String.format(Locale.US, "%s  %d kHz", clock(in.seconds()), Math.round(in.rate / 1000f));
+                final String meta = trackMeta(in);
+                float[] sourceBars = WaveView.measure(in, BARS);
                 Engineer.Session session = Engineer.prepare(in, target, bar);
-                final double sourceLufs = session.before.loudness.integrated;
-                main.post(() -> songMeta.setText(String.format(Locale.US, "%s  %.1f LUFS", meta, sourceLufs)));
-                player.add(new AbPlayer.Version("Source", sourceFile, sourceLufs));
-                items.add(new Item("Source", sourceLufs, session.before.loudness.lra, session.before.midDb, null));
+                final Listen before = session.before;
+                main.post(() -> { songMeta.setText(meta); showMeasured(before); });
+                player.add(new AbPlayer.Version("Source", sourceFile, before.loudness.integrated));
+                items.add(new Item("Source", before, sourceBars, null));
                 in = null;
                 targetMid = target.midDb;
                 List<Engineer.Result> results = new ArrayList<>();
-                float[] bars = null;
                 for (Engineer.Take take : Engineer.Take.values()) {
                     takeIndex[0]++;
                     Engineer.Result r = Engineer.master(session, take, asked, bar);
-                    if (bars == null) bars = WaveView.measure(r.master, 72);
+                    float[] bars = WaveView.measure(r.master, BARS);
                     File[] files = Engineer.deliver(r, dir, name + "_" + take.label);
                     r.master = null;
                     results.add(r);
                     player.add(new AbPlayer.Version(take.label, files[0], r.after.loudness.integrated));
-                    items.add(new Item(take.label, r.after.loudness.integrated, r.after.loudness.lra, r.after.midDb, files));
+                    items.add(new Item(take.label, r.after, bars, files));
                 }
                 session.release();
                 final String text = Engineer.sheet(session, results)
                         + String.format(Locale.US, "%nFinished in %.1f minutes", (System.nanoTime() - t0) / 60e9);
                 sheet = text;
-                final float[] shape = bars;
                 main.post(() -> {
                     busy(false);
-                    lightPath(-1);
-                    statusLine.setText("Done. Keep this screen open while you compare or master again.");
+                    resetPath(true);
+                    statusLine.setText("Done. Your takes are ready to compare.");
                     sheetText.setText(text);
-                    wave.setBars(shape);
                     wave.setFraction(0);
                     for (int i = 0; i < player.size(); i++) order.add(i);
                     selected = 0;
                     player.select(0);
-                    drawVersions();
+                    refreshCompare();
                     compareLink.setVisibility(View.VISIBLE);
+                    compareScreen.scrollTo(0, 0);
                     showCompare(true);
                 });
             } catch (Throwable e) {
@@ -643,13 +812,14 @@ public final class MainActivity extends Activity {
                 File f = new File(sessionDir, "imported_" + System.currentTimeMillis() + ".wav");
                 Wav.write(f, a, 24);
                 Listen l = Listen.to(a);
+                float[] bars = WaveView.measure(a, BARS);
                 final String shortName = name.length() > 16 ? name.substring(0, 16) : name;
                 player.add(new AbPlayer.Version(shortName, f, l.loudness.integrated));
                 main.post(() -> {
-                    items.add(new Item(shortName, l.loudness.integrated, l.loudness.lra, l.midDb, null));
+                    items.add(new Item(shortName, l, bars, null));
                     order.add(player.size() - 1);
                     importButton.setText("Import Stem Lab master");
-                    drawVersions();
+                    refreshCompare();
                 });
             } catch (Throwable e) {
                 main.post(() -> importButton.setText("Import Stem Lab master"));
@@ -662,7 +832,8 @@ public final class MainActivity extends Activity {
         if (order.isEmpty()) return;
         final Item chosen = items.get(order.get(selected));
         if (chosen.files == null) return;
-        Look.enable(saveButton, false);
+        saving = true;
+        refreshCompare();
         worker.execute(() -> {
             try {
                 for (File f : chosen.files) store(f, "audio/wav");
@@ -670,11 +841,13 @@ public final class MainActivity extends Activity {
                 try (PrintWriter w = new PrintWriter(new FileWriter(notes))) { w.print(sheet); }
                 store(notes, "text/plain");
                 main.post(() -> {
-                    Look.enable(saveButton, true);
+                    saving = false;
+                    chosen.saved = true;
+                    refreshCompare();
                     Toast.makeText(this, "Saved to Download/Master Room", Toast.LENGTH_LONG).show();
                 });
             } catch (Throwable e) {
-                main.post(() -> Look.enable(saveButton, true));
+                main.post(() -> { saving = false; refreshCompare(); });
                 fail(e);
             }
         });

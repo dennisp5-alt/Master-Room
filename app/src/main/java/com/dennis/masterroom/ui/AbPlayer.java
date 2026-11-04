@@ -32,6 +32,7 @@ final class AbPlayer {
     private final List<Version> versions = new ArrayList<>();
     private volatile int active;
     private volatile boolean playing, closed;
+    private boolean matched = true;
     private volatile long position;
     private Thread thread;
     private AudioTrack track;
@@ -42,9 +43,26 @@ final class AbPlayer {
             throw new IOException("Needs the same sample rate as the song (" + versions.get(0).header.rate + " Hz)");
         }
         versions.add(v);
+        applyMatch();
+    }
+
+    /** Playback gain only: the files on disk are never touched. */
+    private void applyMatch() {
         double quietest = Double.MAX_VALUE;
         for (Version x : versions) quietest = Math.min(quietest, x.lufs);
-        for (Version x : versions) x.gain = (float) Math.pow(10, (quietest - x.lufs) / 20);
+        for (Version x : versions) x.gain = matched ? (float) Math.pow(10, (quietest - x.lufs) / 20) : 1f;
+    }
+
+    synchronized void setMatched(boolean on) {
+        matched = on;
+        applyMatch();
+    }
+
+    synchronized boolean isMatched() { return matched; }
+
+    /** The playback trim on one version, in dB. */
+    synchronized double trimDb(int i) {
+        return 20 * Math.log10(Math.max(1e-6, versions.get(i).gain));
     }
 
     synchronized void clear() {
@@ -65,7 +83,7 @@ final class AbPlayer {
     }
 
     synchronized void seek(double fraction) {
-        if (!versions.isEmpty()) position = (long) (fraction * versions.get(0).header.frames);
+        if (!versions.isEmpty()) position = (long) (Math.max(0, Math.min(1, fraction)) * versions.get(0).header.frames);
     }
 
     void play() {
