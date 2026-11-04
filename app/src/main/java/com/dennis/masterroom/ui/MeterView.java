@@ -16,13 +16,13 @@ import java.util.Locale;
  * measured source LUFS. No measured needle or displayed loudness is ever fabricated.
  */
 final class MeterView extends View {
-    private static final float W = 342f, H = 158f;
-    private static final float CX = 171f, CY = 156f, R = 117f, LOW = -24f, HIGH = -6f;
+    private static final float W = 342f, H = 138f;
+    private static final float CX = 171f, CY = 142f, R = 105f, LOW = -24f, HIGH = -6f;
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final RectF full = new RectF(0, 0, W, H);
     private final RectF arc = new RectF(CX - R, CY - R, CX + R, CY + R);
-    private final RectF glass = new RectF(4, 4, W - 4, 121);
+    private final RectF glass = new RectF(4, 4, W - 4, 105);
     private float target = -14, measured = Float.NaN;
 
     MeterView(Context c) { super(c); describe(); }
@@ -61,7 +61,7 @@ final class MeterView extends View {
 
         // Smoked glass, inset specular highlights and calibrated arced scale.
         p.setStyle(Paint.Style.FILL);
-        p.setShader(new LinearGradient(0, 3, 0, 121,
+        p.setShader(new LinearGradient(0, 3, 0, 105,
                 new int[]{0xFF161D27, 0xFF0B1018, 0xFF04070A}, null, Shader.TileMode.CLAMP));
         c.drawRoundRect(glass, 7, 7, p);
         p.setShader(null);
@@ -112,37 +112,37 @@ final class MeterView extends View {
             p.setStrokeWidth(2.15f);
             p.setStrokeCap(Paint.Cap.ROUND);
             p.setColor(0xFFFAF5ED);
-            c.drawLine(CX, 117, x(measured, R + 2), y(measured, R + 2), p);
+            c.drawLine(CX, 101, x(measured, R + 2), y(measured, R + 2), p);
         } else {
             p.setTypeface(Look.label);
             p.setTextSize(12);
             p.setColor(0xFF97A3B2);
-            c.drawText("AWAITING ANALYSIS", CX, 110, p);
+            c.drawText("AWAITING ANALYSIS", CX, 98, p);
         }
 
         // Small built-in readout, with clear distinction between chosen and measured data.
         p.setStyle(Paint.Style.FILL);
         p.setColor(0xFF101721);
-        c.drawRoundRect(new RectF(5, 122, W - 5, 154), 4, 4, p);
+        c.drawRoundRect(new RectF(5, 107, W - 5, 135), 4, 4, p);
         p.setTypeface(Look.label);
         p.setTextSize(11);
         p.setTextAlign(Paint.Align.LEFT);
         p.setColor(0xFFB8A37D);
-        c.drawText("TARGET", 13, 135, p);
+        c.drawText("TARGET", 13, 118, p);
         p.setTypeface(Look.mono);
-        p.setTextSize(15);
+        p.setTextSize(14);
         p.setColor(Look.AMBER);
-        c.drawText(String.format(Locale.US, "%.1f", target), 13, 150, p);
+        c.drawText(String.format(Locale.US, "%.1f", target), 13, 132, p);
 
         p.setTextAlign(Paint.Align.RIGHT);
         p.setTypeface(Look.label);
         p.setTextSize(11);
         p.setColor(0xFF9AA9BA);
-        c.drawText("SOURCE  ·  LUFS", W - 13, 135, p);
+        c.drawText("SOURCE  ·  LUFS", W - 13, 118, p);
         p.setTypeface(Look.mono);
-        p.setTextSize(15);
+        p.setTextSize(14);
         p.setColor(Look.TEXT);
-        c.drawText(Float.isFinite(measured) ? String.format(Locale.US, "%.1f", measured) : "--", W - 13, 150, p);
+        c.drawText(Float.isFinite(measured) ? String.format(Locale.US, "%.1f", measured) : "--", W - 13, 132, p);
         c.restore();
     }
 }
