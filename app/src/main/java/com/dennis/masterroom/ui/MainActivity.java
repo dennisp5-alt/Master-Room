@@ -227,6 +227,7 @@ public final class MainActivity extends Activity {
             cell.addView(led, new LinearLayout.LayoutParams(Look.dp(9), Look.dp(9)));
             TextView t = parts.text(STAGES[i], Look.label, 14, Look.MID);
             t.setPadding(0, Look.dp(6), 0, 0);
+            t.setGravity(Gravity.CENTER);
             cell.addView(t);
             path.addView(cell, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
         }

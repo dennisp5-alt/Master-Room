@@ -71,6 +71,9 @@ public class UiSmokeTest {
     }
 
     private <T> T onUi(Callable<T> c) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            try { return c.call(); } catch (Exception e) { throw new RuntimeException(e); }
+        }
         AtomicReference<T> out = new AtomicReference<>();
         AtomicReference<Exception> err = new AtomicReference<>();
         ins.runOnMainSync(() -> { try { out.set(c.call()); } catch (Exception e) { err.set(e); } });

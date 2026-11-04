@@ -121,10 +121,14 @@ final class Parts {
         t.setBackground(Look.shape(Look.WELL, Look.HAIR, 5));
         TextView n = text(name, Look.label, 13, Look.DIM);
         n.setLetterSpacing(0.08f);
+        n.setGravity(Gravity.CENTER);
         t.addView(n);
         TextView v = text("--", Look.mono, 21, Look.TEXT);
+        v.setGravity(Gravity.CENTER);
         t.addView(v);
-        t.addView(text(unit, Look.label, 13, Look.DIM));
+        TextView u = text(unit, Look.label, 13, Look.DIM);
+        u.setGravity(Gravity.CENTER);
+        t.addView(u);
         parent.addView(t, share(Parts.WRAP, 1, leftDp));
         return v;
     }

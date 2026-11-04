@@ -12,7 +12,7 @@ import android.view.View;
  * measured integrated loudness and is only drawn once that measurement exists.
  */
 final class MeterView extends View {
-    private static final float W = 342, H = 196, CX = 171, CY = 246, R = 186, LOW = -24, HIGH = -6;
+    private static final float W = 342, H = 184, CX = 171, CY = 222, R = 186, LOW = -24, HIGH = -6;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path mark = new Path();
     private final RectF oval = new RectF(CX - R, CY - R, CX + R, CY + R), face = new RectF(0, 0, W, H);
@@ -89,7 +89,7 @@ final class MeterView extends View {
             paint.setTypeface(Look.body);
             paint.setTextSize(15);
             paint.setColor(Look.DIM);
-            c.drawText("Source not measured yet", CX, 128, paint);
+            c.drawText("Source not measured yet", CX, 108, paint);
         } else {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeCap(Paint.Cap.ROUND);
@@ -100,16 +100,16 @@ final class MeterView extends View {
 
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(Look.PANEL);
-        c.drawRect(0, 164, W, H, paint);
+        c.drawRect(0, 152, W, H, paint);
         paint.setTypeface(Look.label);
         paint.setTextSize(13);
         paint.setLetterSpacing(0.1f);
         paint.setColor(Look.AMBER);
         paint.setTextAlign(Paint.Align.LEFT);
-        c.drawText("MARKER: TARGET", 10, 185, paint);
+        c.drawText("MARKER: TARGET", 10, 173, paint);
         paint.setColor(Look.MID);
         paint.setTextAlign(Paint.Align.RIGHT);
-        c.drawText("NEEDLE: MEASURED SOURCE", W - 10, 185, paint);
+        c.drawText("NEEDLE: MEASURED SOURCE", W - 10, 173, paint);
         paint.setLetterSpacing(0);
         c.restore();
     }
