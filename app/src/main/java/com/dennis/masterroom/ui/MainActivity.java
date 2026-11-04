@@ -92,7 +92,7 @@ public final class MainActivity extends Activity {
     private final List<Item> items = new ArrayList<>();
     private final List<Integer> order = new ArrayList<>();
     private int selected, blind = BLIND_OFF, pickedShown = -1;
-    private boolean matchBeforeBlind = true, saving, working;
+    private boolean matchBeforeBlind = true, saving, working, importing;
     private double[] targetMid;
     private File sessionDir;
     private String sheet = "";
@@ -597,8 +597,8 @@ public final class MainActivity extends Activity {
                     ? String.format(Locale.US, "Your pick, Version %d, was %s.", pickedShown + 1, items.get(order.get(pickedShown)).name) : "");
             blindButton.setText("End blind test");
         }
-        Look.enable(blindButton, any);
-        Look.enable(importButton, any && !hide && !working);
+        Look.enable(blindButton, any && !importing);
+        Look.enable(importButton, any && !hide && !working && !importing);
         Look.enable(playButton, any);
 
         wave.setBars(!any ? null : hide ? items.get(0).bars : item.bars);
@@ -810,7 +810,9 @@ public final class MainActivity extends Activity {
 
     private void importMaster(Uri uri) {
         final String name = nameOf(uri);
-        importButton.setText("Measuring " + name);
+        importing = true;
+        importButton.setText("Measuring master");
+        refreshCompare();
         worker.execute(() -> {
             try {
                 Audio a = Decoder.open(this, uri);
@@ -823,11 +825,16 @@ public final class MainActivity extends Activity {
                 main.post(() -> {
                     items.add(new Item(shortName, l, bars, null));
                     order.add(player.size() - 1);
+                    importing = false;
                     importButton.setText("Import Stem Lab master");
                     refreshCompare();
                 });
             } catch (Throwable e) {
-                main.post(() -> importButton.setText("Import Stem Lab master"));
+                main.post(() -> {
+                    importing = false;
+                    importButton.setText("Import Stem Lab master");
+                    refreshCompare();
+                });
                 fail(e);
             }
         });

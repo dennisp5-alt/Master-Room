@@ -226,7 +226,7 @@ public class UiSmokeTest {
         scroll(true);
         answerPicker(other);
         tap("Import Stem Lab master");
-        waitFor("imported master", 120000, () -> hasText("StemLab_Master"));
+        waitFor("imported master", 120000, () -> hasText("StemLab_Master") && find("Import Stem Lab master") != null);
         shot("compare_imported");
         scroll(false);
 
