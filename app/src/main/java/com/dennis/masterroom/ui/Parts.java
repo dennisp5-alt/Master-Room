@@ -36,7 +36,7 @@ final class Parts {
 
     /** Engraved panel label. */
     TextView label(String s) {
-        TextView t = text(s, Look.label, 15, Look.DIM);
+        TextView t = text(s, Look.label, 14, Look.MID);
         t.setLetterSpacing(0.12f);
         return t;
     }
@@ -58,8 +58,8 @@ final class Parts {
     LinearLayout panel(int topMarginDp, LinearLayout parent) {
         LinearLayout p = new LinearLayout(c);
         p.setOrientation(LinearLayout.VERTICAL);
-        p.setPadding(Look.dp(12), Look.dp(10), Look.dp(12), Look.dp(12));
-        p.setBackground(Look.metal(8));
+        p.setPadding(Look.dp(14), Look.dp(14), Look.dp(14), Look.dp(16));
+        p.setBackground(Look.metal(12));
         parent.addView(p, line(WRAP, topMarginDp));
         return p;
     }
@@ -69,7 +69,7 @@ final class Parts {
         Look.flat(b);
         b.setText(s);
         Look.type(b, Look.label, 17, Look.TEXT);
-        Look.surface(b, Look.shape(Look.PANEL, Look.LINE, 6));
+        Look.surface(b, Look.shape(Look.RAISED, Look.LINE, 9));
         b.setOnClickListener(click);
         return b;
     }
@@ -91,9 +91,9 @@ final class Parts {
         Button b = new Button(c);
         Look.flat(b);
         b.setText(s);
-        Look.type(b, Look.title, 22, Look.BG);
+        Look.type(b, Look.title, 23, Look.WELL);
         b.setLetterSpacing(0.12f);
-        Look.surface(b, Look.gold(7));
+        Look.surface(b, Look.gold(10));
         b.setOnClickListener(click);
         return b;
     }
@@ -103,10 +103,10 @@ final class Parts {
         Button b = new Button(c);
         Look.flat(b);
         b.setText(s);
-        Look.type(b, face, 16, on ? Look.BG : Look.TEXT);
-        Look.surface(b, on ? Look.gold(5) : Look.shape(Look.RAISED, Look.LINE, 5));
+        Look.type(b, face, 17, on ? Look.WELL : Look.TEXT);
+        Look.surface(b, on ? Look.gold(9) : Look.shape(Look.RAISED, Look.LINE, 9));
         b.setOnClickListener(click);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, Look.dp(48), 1);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, Look.dp(50), 1);
         p.setMargins(Look.dp(3), 0, Look.dp(3), 0);
         b.setLayoutParams(p);
         return b;
@@ -117,16 +117,16 @@ final class Parts {
         LinearLayout t = new LinearLayout(c);
         t.setOrientation(LinearLayout.VERTICAL);
         t.setGravity(Gravity.CENTER_HORIZONTAL);
-        t.setPadding(Look.dp(4), Look.dp(8), Look.dp(4), Look.dp(8));
-        t.setBackground(Look.shape(Look.WELL, Look.HAIR, 5));
-        TextView n = text(name, Look.label, 13, Look.DIM);
+        t.setPadding(Look.dp(4), Look.dp(12), Look.dp(4), Look.dp(12));
+        t.setBackground(Look.shape(Look.WELL, Look.HAIR, 9));
+        TextView n = text(name, Look.label, 12, Look.DIM);
         n.setLetterSpacing(0.08f);
         n.setGravity(Gravity.CENTER);
         t.addView(n);
-        TextView v = text("--", Look.mono, 21, Look.TEXT);
+        TextView v = text("--", Look.mono, 22, Look.TEXT);
         v.setGravity(Gravity.CENTER);
         t.addView(v);
-        TextView u = text(unit, Look.label, 13, Look.DIM);
+        TextView u = text(unit, Look.label, 12, Look.AMBER_DIM);
         u.setGravity(Gravity.CENTER);
         t.addView(u);
         parent.addView(t, share(Parts.WRAP, 1, leftDp));
