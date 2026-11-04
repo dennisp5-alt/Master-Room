@@ -58,7 +58,7 @@ final class Parts {
     LinearLayout panel(int topMarginDp, LinearLayout parent) {
         LinearLayout p = new LinearLayout(c);
         p.setOrientation(LinearLayout.VERTICAL);
-        p.setPadding(Look.dp(14), Look.dp(14), Look.dp(14), Look.dp(16));
+        p.setPadding(Look.dp(11), Look.dp(9), Look.dp(11), Look.dp(10));
         p.setBackground(Look.metal(12));
         parent.addView(p, line(WRAP, topMarginDp));
         return p;
@@ -91,7 +91,7 @@ final class Parts {
         Button b = new Button(c);
         Look.flat(b);
         b.setText(s);
-        Look.type(b, Look.title, 23, Look.WELL);
+        Look.type(b, Look.title, 21, Look.WELL);
         b.setLetterSpacing(0.12f);
         Look.surface(b, Look.gold(10));
         b.setOnClickListener(click);
@@ -103,10 +103,10 @@ final class Parts {
         Button b = new Button(c);
         Look.flat(b);
         b.setText(s);
-        Look.type(b, face, 17, on ? Look.WELL : Look.TEXT);
+        Look.type(b, face, 16, on ? Look.WELL : Look.TEXT);
         Look.surface(b, on ? Look.gold(9) : Look.shape(Look.RAISED, Look.LINE, 9));
         b.setOnClickListener(click);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, Look.dp(50), 1);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, Look.dp(48), 1);
         p.setMargins(Look.dp(3), 0, Look.dp(3), 0);
         b.setLayoutParams(p);
         return b;
@@ -117,16 +117,16 @@ final class Parts {
         LinearLayout t = new LinearLayout(c);
         t.setOrientation(LinearLayout.VERTICAL);
         t.setGravity(Gravity.CENTER_HORIZONTAL);
-        t.setPadding(Look.dp(4), Look.dp(12), Look.dp(4), Look.dp(12));
+        t.setPadding(Look.dp(3), Look.dp(4), Look.dp(3), Look.dp(4));
         t.setBackground(Look.shape(Look.WELL, Look.HAIR, 9));
-        TextView n = text(name, Look.label, 12, Look.DIM);
+        TextView n = text(name, Look.label, 11, Look.DIM);
         n.setLetterSpacing(0.08f);
         n.setGravity(Gravity.CENTER);
         t.addView(n);
-        TextView v = text("--", Look.mono, 22, Look.TEXT);
+        TextView v = text("--", Look.mono, 18, Look.TEXT);
         v.setGravity(Gravity.CENTER);
         t.addView(v);
-        TextView u = text(unit, Look.label, 12, Look.AMBER_DIM);
+        TextView u = text(unit, Look.label, 11, Look.AMBER_DIM);
         u.setGravity(Gravity.CENTER);
         t.addView(u);
         parent.addView(t, share(Parts.WRAP, 1, leftDp));
