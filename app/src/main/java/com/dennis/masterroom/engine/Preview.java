@@ -55,8 +55,9 @@ public final class Preview {
     public Preview(Mode mode, int rate) {
         switch (mode) {
             case PHONE:
-                chain = new Biquad[]{high(320, 0.7, rate), high(320, 0.7, rate), bell(2800, 1.0, 4, rate), low(13000, 0.7, rate)};
-                width = 0.25f; gain = 0.6f;
+                // A current flagship: real stereo and useful upper bass, only the deep lows missing.
+                chain = new Biquad[]{high(150, 0.8, rate), high(150, 0.8, rate), bell(320, 1.0, 1.5, rate), bell(3000, 1.2, 1.5, rate), low(17000, 0.7, rate)};
+                width = 0.7f; gain = 0.75f;
                 break;
             case BUDS:
                 chain = new Biquad[]{lowShelf(90, 4, rate), bell(450, 1.0, -1.5, rate), highShelf(7000, 2, rate)};

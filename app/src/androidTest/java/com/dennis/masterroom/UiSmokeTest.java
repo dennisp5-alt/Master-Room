@@ -244,10 +244,10 @@ public class UiSmokeTest {
         tap("Pause");
 
         tap("Phone");
-        assertTrue(hasText("Rough preview"));
+        assertTrue(hasText("preview"));
         shot("compare_preview");
         tap("Full");
-        assertFalse(hasText("Rough preview"));
+        assertFalse(hasText("preview"));
 
         tap("Turn level match off");
         assertTrue(hasText("real level"));

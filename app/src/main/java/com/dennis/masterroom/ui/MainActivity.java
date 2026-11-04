@@ -9,6 +9,8 @@ import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -99,6 +101,8 @@ public final class MainActivity extends Activity {
     private final View[] leds = new View[STAGES.length];
 
     private TextView albumLine, tasteLine, previewNote;
+    private int routeTick;
+    private boolean lastSpeaker;
     private Button albumButton, manageButton;
     private LinearLayout dock, shelfList, previewRow, releasePanel;
     private ImageView releaseChevron;
@@ -684,14 +688,41 @@ public final class MainActivity extends Activity {
             final Preview.Mode pick = m;
             Button b = parts.segment(m.label, m == previewMode, Look.strong, v -> {
                 previewMode = pick;
-                player.setPreview(pick);
+                applyPreview();
                 drawPreview();
             });
             Look.type(b, Look.strong, 14, m == previewMode ? Look.BG : Look.TEXT);
             b.setPadding(0, 0, 0, 0);
             previewRow.addView(b);
         }
+        boolean speaker = onPhoneSpeaker();
         previewNote.setVisibility(previewMode == Preview.Mode.FULL ? View.GONE : View.VISIBLE);
+        if (previewMode == Preview.Mode.PHONE && speaker) previewNote.setText("You are on the phone's speaker now, so this is the real thing. No preview added.");
+        else if (speaker && previewMode != Preview.Mode.MONO) previewNote.setText("Rough preview. Use headphones for this one: your phone's speaker changes the sound as well.");
+        else previewNote.setText("Rough preview of a typical device, not a measurement. Your files are not changed.");
+    }
+
+    /** The phone preview on the phone's own speaker would apply the same change twice. */
+    private void applyPreview() {
+        player.setPreview(previewMode == Preview.Mode.PHONE && onPhoneSpeaker() ? Preview.Mode.FULL : previewMode);
+    }
+
+    private boolean onPhoneSpeaker() {
+        AudioManager audio = (AudioManager) getSystemService(AUDIO_SERVICE);
+        for (AudioDeviceInfo d : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            switch (d.getType()) {
+                case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+                case AudioDeviceInfo.TYPE_WIRED_HEADSET:
+                case AudioDeviceInfo.TYPE_USB_HEADSET:
+                case AudioDeviceInfo.TYPE_USB_DEVICE:
+                case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+                case AudioDeviceInfo.TYPE_BLE_HEADSET:
+                case AudioDeviceInfo.TYPE_BLE_SPEAKER:
+                    return false;
+                default:
+            }
+        }
+        return true;
     }
 
     private void showTone(boolean on) {
@@ -898,6 +929,12 @@ public final class MainActivity extends Activity {
             boolean playing = player.isPlaying();
             playButton.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
             playButton.setContentDescription(playing ? "Pause" : "Play");
+            // Follow headphones being connected or removed.
+            if (++routeTick >= 10) {
+                routeTick = 0;
+                boolean speaker = onPhoneSpeaker();
+                if (speaker != lastSpeaker) { lastSpeaker = speaker; applyPreview(); drawPreview(); }
+            }
         }
         main.postDelayed(this::tick, 100);
     }
@@ -1009,7 +1046,7 @@ public final class MainActivity extends Activity {
         blind = BLIND_OFF; pickedShown = -1;
         player.setMatched(true);
         previewMode = Preview.Mode.FULL;
-        player.setPreview(previewMode);
+        applyPreview();
         drawPreview();
         compareLink.setVisibility(View.GONE);
         refreshCompare();

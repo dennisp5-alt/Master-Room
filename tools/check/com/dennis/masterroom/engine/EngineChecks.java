@@ -136,6 +136,8 @@ public final class EngineChecks {
 
         // Previews: playback-only curves do what their names say.
         check("Phone preview loses deep bass", previewDb(Preview.Mode.PHONE, 60) < previewDb(Preview.Mode.PHONE, 1000) - 20, String.format(Locale.US, "60 Hz %.1f dB, 1 kHz %.1f dB", previewDb(Preview.Mode.PHONE, 60), previewDb(Preview.Mode.PHONE, 1000)));
+        check("Phone preview keeps upper bass and top end", previewDb(Preview.Mode.PHONE, 250) > previewDb(Preview.Mode.PHONE, 1000) - 2 && previewDb(Preview.Mode.PHONE, 12000) > previewDb(Preview.Mode.PHONE, 1000) - 2,
+                String.format(Locale.US, "120 Hz %.1f, 250 Hz %.1f, 1 kHz %.1f, 3 kHz %.1f, 12 kHz %.1f dB", previewDb(Preview.Mode.PHONE, 120), previewDb(Preview.Mode.PHONE, 250), previewDb(Preview.Mode.PHONE, 1000), previewDb(Preview.Mode.PHONE, 3000), previewDb(Preview.Mode.PHONE, 12000)));
         check("Small speaker preview loses sub bass", previewDb(Preview.Mode.SMALL, 40) < previewDb(Preview.Mode.SMALL, 130) - 10, "");
         check("Full preview changes nothing", Math.abs(previewDb(Preview.Mode.FULL, 1000)) < 0.01, "");
 
