@@ -3,7 +3,7 @@ name: UI smoke test
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, 'design/studio-console-premium-v1']
 
 concurrency:
   group: ui-smoke
@@ -49,7 +49,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -no-snapshot
           script: bash tools/run_smoke.sh
       - name: Publish screenshots for review
-        if: always()
+        if: always() && github.ref == 'refs/heads/main'
         run: |
           [ -d ui-screens ] || exit 0
           cd ui-screens
@@ -59,3 +59,11 @@ jobs:
           git add -A
           git commit -q -m "Screens for ${GITHUB_SHA::7}"
           git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ci-screens
+
+      - name: Upload UI screenshots for design review
+        if: always() && github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudioConsole-UI-screenshots
+          path: ui-screens/
+          if-no-files-found: ignore
