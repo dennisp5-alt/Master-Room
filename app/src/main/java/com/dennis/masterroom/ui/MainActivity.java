@@ -170,109 +170,138 @@ public final class MainActivity extends Activity {
         header.addView(compareLink, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
         column.addView(header, Parts.line(Look.dp(56), 0));
 
-        LinearLayout card = parts.row();
-        card.setPadding(Look.dp(11), Look.dp(12), Look.dp(14), Look.dp(12));
-        card.setMinimumHeight(Look.dp(88));
-        Look.surface(card, Look.metal(12));
-        card.setClickable(true);
-        card.setOnClickListener(v -> pick(PICK_SONG));
-        TextView artwork = parts.text("♫", Look.title, 32, Look.AMBER);
+        // The source strip is deliberately compact: project, file, and action on one line.
+        LinearLayout songCard = parts.row();
+        songCard.setPadding(Look.dp(10), Look.dp(7), Look.dp(12), Look.dp(7));
+        songCard.setMinimumHeight(Look.dp(68));
+        Look.surface(songCard, Look.metal(10));
+        songCard.setClickable(true);
+        songCard.setOnClickListener(v -> pick(PICK_SONG));
+        TextView artwork = parts.text("♫", Look.strong, 25, Look.AMBER);
         artwork.setGravity(Gravity.CENTER);
-        artwork.setBackground(Look.shape(Look.WELL, Look.AMBER_DIM, 9));
-        artwork.setContentDescription("Track placeholder artwork");
-        LinearLayout.LayoutParams cover = new LinearLayout.LayoutParams(Look.dp(60), Look.dp(60));
-        cover.rightMargin = Look.dp(12);
-        card.addView(artwork, cover);
+        artwork.setBackground(Look.shape(Look.WELL, Look.AMBER_DIM, 8));
+        artwork.setContentDescription("Track artwork placeholder");
+        LinearLayout.LayoutParams cover = new LinearLayout.LayoutParams(Look.dp(49), Look.dp(49));
+        cover.rightMargin = Look.dp(11);
+        songCard.addView(artwork, cover);
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
         TextView sourceLabel = parts.text("CURRENT SESSION", Look.label, 10, Look.AMBER);
-        sourceLabel.setLetterSpacing(0.1f);
+        sourceLabel.setLetterSpacing(0.09f);
         info.addView(sourceLabel);
-        songName = parts.text("No song loaded", Look.strong, 18, Look.TEXT);
+        songName = parts.text("No song loaded", Look.strong, 17, Look.TEXT);
         songName.setSingleLine(true);
-        songMeta = parts.text("WAV, or anything the phone can play", Look.mono, 12, Look.DIM);
+        songName.setEllipsize(android.text.TextUtils.TruncateAt.END);
         info.addView(songName);
+        songMeta = parts.text("Choose an audio file", Look.body, 11, Look.DIM);
+        songMeta.setSingleLine(true);
+        songMeta.setEllipsize(android.text.TextUtils.TruncateAt.END);
         info.addView(songMeta);
-        card.addView(info, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        songCard.addView(info, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
         songAction = parts.text("Load", Look.label, 16, Look.AMBER);
-        songAction.setPadding(Look.dp(10), Look.dp(12), Look.dp(2), Look.dp(12));
-        card.addView(songAction);
-        column.addView(card, Parts.line(Parts.WRAP, 6));
+        songAction.setGravity(Gravity.CENTER);
+        songAction.setMinWidth(Look.dp(48));
+        songCard.addView(songAction, new LinearLayout.LayoutParams(Look.dp(58), Look.dp(48)));
+        column.addView(songCard, Parts.line(Parts.WRAP, 7));
 
-        LinearLayout monitor = parts.panel(10, column);
-        monitor.addView(parts.label("SOURCE LOUDNESS"));
-        TextView meterDesc = parts.text("ANALOGUE MONITOR  ·  INTEGRATED LUFS", Look.label, 11, Look.AMBER_DIM);
-        meterDesc.setLetterSpacing(0.06f);
-        monitor.addView(meterDesc, Parts.line(Parts.WRAP, 4));
-        FrameLayout well = new FrameLayout(this);
-        well.setBackground(Look.shape(Look.WELL, Look.HAIR, 6));
+        // One calibrated monitor with real numerical results, not three oversized cards.
+        LinearLayout monitor = parts.panel(8, column);
+        LinearLayout monitorTitle = parts.row();
+        monitorTitle.addView(parts.label("MASTERING MONITOR"));
+        monitorTitle.addView(parts.grow());
+        TextView sourceMode = parts.text("SOURCE  /  I", Look.mono, 10, Look.AMBER);
+        monitorTitle.addView(sourceMode);
+        monitor.addView(monitorTitle);
+        FrameLayout meterWell = new FrameLayout(this);
+        meterWell.setBackground(Look.shape(Look.WELL, Look.HAIR, 7));
         meter = new MeterView(this);
-        well.addView(meter);
-        well.setClipToOutline(true);
-        monitor.addView(well, Parts.line(Parts.WRAP, 6));
+        meterWell.addView(meter);
+        monitor.addView(meterWell, Parts.line(Parts.WRAP, 7));
         LinearLayout tiles = parts.row();
         measuredLufs = parts.readout(tiles, "INTEGRATED", "LUFS", 0);
-        measuredPeak = parts.readout(tiles, "TRUE PEAK", "dBTP", 6);
-        measuredRange = parts.readout(tiles, "RANGE", "LU", 6);
-        monitor.addView(tiles, Parts.line(Parts.WRAP, 10));
+        measuredPeak = parts.readout(tiles, "TRUE PEAK", "dBTP", 5);
+        measuredRange = parts.readout(tiles, "RANGE", "LU", 5);
+        monitor.addView(tiles, Parts.line(Parts.WRAP, 7));
 
-        LinearLayout stylePanel = parts.panel(10, column);
-        stylePanel.addView(parts.label("MASTERING STYLE"));
+        // Profile, reference records and target share one compact control rack.
+        LinearLayout controls = parts.panel(8, column);
+        LinearLayout styleTitle = parts.row();
+        styleTitle.addView(parts.label("MASTERING PROFILE"));
+        styleTitle.addView(parts.grow());
+        styleTitle.addView(parts.text("01  /  STYLE", Look.mono, 10, Look.AMBER_DIM));
+        controls.addView(styleTitle);
         styleRow = parts.row();
-        stylePanel.addView(styleRow, Parts.line(Look.dp(48), 6));
+        controls.addView(styleRow, Parts.line(Look.dp(48), 5));
         LinearLayout refs = parts.row();
-        referenceLine = parts.text("", Look.body, 13, Look.DIM);
+        referenceLine = parts.text("", Look.body, 12, Look.DIM);
+        referenceLine.setSingleLine(true);
+        referenceLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
         refs.addView(referenceLine, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
-        refs.addView(parts.link("ADD RECORD", v -> pick(PICK_REFERENCE)), new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
-        stylePanel.addView(refs, Parts.line(Parts.WRAP, 2));
-        drawStyles();
+        refs.addView(parts.link("+ REFERENCE", v -> pick(PICK_REFERENCE)),
+                new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(40)));
+        controls.addView(refs, Parts.line(Look.dp(40), 0));
+        View divider = new View(this);
+        divider.setBackgroundColor(Look.HAIR);
+        controls.addView(divider, Parts.line(Look.dp(1), 0));
 
-        LinearLayout levelPanel = parts.panel(10, column);
-        levelPanel.addView(parts.label("TARGET LOUDNESS  ·  LUFS"));
+        LinearLayout targetTitle = parts.row();
+        targetTitle.addView(parts.label("LOUDNESS TARGET"));
+        targetTitle.addView(parts.grow());
+        targetTitle.addView(parts.text("02  /  LUFS", Look.mono, 10, Look.AMBER_DIM));
+        controls.addView(targetTitle, Parts.line(Parts.WRAP, 7));
         levelRow = parts.row();
-        levelPanel.addView(levelRow, Parts.line(Look.dp(48), 6));
-        ceilingLine = parts.text("", Look.mono, 12, Look.DIM);
-        levelPanel.addView(ceilingLine, Parts.line(Parts.WRAP, 8));
+        controls.addView(levelRow, Parts.line(Look.dp(48), 5));
+        ceilingLine = parts.text("", Look.mono, 11, Look.DIM);
+        ceilingLine.setSingleLine(true);
+        ceilingLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        controls.addView(ceilingLine, Parts.line(Parts.WRAP, 7));
+        drawStyles();
         drawLevels();
 
-        LinearLayout pathPanel = parts.panel(10, column);
-        pathPanel.addView(parts.label("SIGNAL PATH"));
-        LinearLayout path = new LinearLayout(this);
-        path.setOrientation(LinearLayout.HORIZONTAL);
+        // Six hardware-like modules: labels and actual activity LEDs, not false readouts.
+        LinearLayout pathPanel = parts.panel(8, column);
+        LinearLayout pathTitle = parts.row();
+        pathTitle.addView(parts.label("SIGNAL CHAIN"));
+        pathTitle.addView(parts.grow());
+        pathTitle.addView(parts.text("06 MODULES", Look.mono, 10, Look.AMBER_DIM));
+        pathPanel.addView(pathTitle);
+        LinearLayout path = parts.row();
+        final String[] symbols = {"≋", "▥", "◉", "◇", "⌁", "▣"};
         for (int i = 0; i < STAGES.length; i++) {
-            LinearLayout cell = new LinearLayout(this);
-            cell.setOrientation(LinearLayout.VERTICAL);
-            cell.setGravity(Gravity.CENTER_HORIZONTAL);
-            cell.setPadding(0, Look.dp(9), 0, Look.dp(9));
-            cell.setBackground(Look.shape(Look.WELL, Look.HAIR, 7));
-            String[] symbols = {"≋", "▥", "◉", "◇", "⌁", "▣"};
-            TextView glyph = parts.text(symbols[i], Look.strong, 20, Look.AMBER);
+            LinearLayout module = new LinearLayout(this);
+            module.setOrientation(LinearLayout.VERTICAL);
+            module.setGravity(Gravity.CENTER);
+            module.setBackground(Look.shape(Look.WELL, Look.HAIR, 7));
+            module.setPadding(0, Look.dp(4), 0, Look.dp(3));
+            TextView glyph = parts.text(symbols[i], Look.strong, 19, Look.AMBER);
             glyph.setGravity(Gravity.CENTER);
-            cell.addView(glyph, new LinearLayout.LayoutParams(Parts.MATCH, Look.dp(28)));
-            TextView t = parts.text(STAGES[i], Look.label, 12, Look.MID);
-            t.setGravity(Gravity.CENTER);
-            cell.addView(t);
+            module.addView(glyph, new LinearLayout.LayoutParams(Parts.MATCH, Look.dp(24)));
+            LinearLayout moduleFoot = parts.row();
+            moduleFoot.setGravity(Gravity.CENTER);
             View led = new View(this);
             leds[i] = led;
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(Look.dp(7), Look.dp(7));
-            lp.topMargin = Look.dp(6);
-            cell.addView(led, lp);
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, Parts.WRAP, 1);
-            cp.leftMargin = i == 0 ? 0 : Look.dp(4);
-            path.addView(cell, cp);
+            LinearLayout.LayoutParams dot = new LinearLayout.LayoutParams(Look.dp(5), Look.dp(5));
+            dot.rightMargin = Look.dp(3);
+            moduleFoot.addView(led, dot);
+            TextView shortName = parts.text(STAGES[i], Look.label, 11, Look.MID);
+            moduleFoot.addView(shortName);
+            module.addView(moduleFoot);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, Look.dp(48), 1);
+            if (i > 0) cp.leftMargin = Look.dp(3);
+            path.addView(module, cp);
         }
-        pathPanel.addView(path, Parts.line(Parts.WRAP, 8));
+        pathPanel.addView(path, Parts.line(Parts.WRAP, 5));
 
         masterButton = parts.gold("MASTER IT", v -> master());
         Look.enable(masterButton, false);
-        column.addView(masterButton, Parts.line(Look.dp(64), 16));
+        column.addView(masterButton, Parts.line(Look.dp(58), 10));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
         progress.setProgressTintList(ColorStateList.valueOf(Look.AMBER));
         progress.setVisibility(View.GONE);
-        column.addView(progress, Parts.line(Parts.WRAP, 8));
-        statusLine = parts.text("", Look.body, 14, Look.DIM);
-        column.addView(statusLine, Parts.line(Parts.WRAP, 6));
+        column.addView(progress, Parts.line(Parts.WRAP, 7));
+        statusLine = parts.text("", Look.body, 13, Look.DIM);
+        column.addView(statusLine, Parts.line(Parts.WRAP, 5));
         return s;
     }
 
@@ -989,7 +1018,7 @@ public final class MainActivity extends Activity {
 
     private void refreshReferences() {
         int n = shelfRecords().size();
-        referenceLine.setText(n == 0 ? "Starting curve. Add 3 to 5 records you want to sound like."
+        referenceLine.setText(n == 0 ? "Built-in curve  ·  add 3–5 records"
                 : n + " reference record" + (n == 1 ? "" : "s") + " for this style.");
     }
 
