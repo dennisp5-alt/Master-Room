@@ -90,6 +90,7 @@ final class Oversample {
         long total = (long) frames + delay;
         long written = 0;
         for (long pos = 0; pos < total; pos += BLOCK) {
+            Engineer.checkStop();
             final int n = (int) Math.min(BLOCK, total - pos), at = (int) Math.min(pos, frames);
             both(() -> ul.run(in.l, at, n, hl), () -> ur.run(in.r, at, n, hr));
             stage.process(hl, hr, n * FACTOR);
@@ -119,6 +120,7 @@ final class Oversample {
         double[] l = new double[BLOCK], r = new double[BLOCK];
         long total = (long) frames + delay, written = 0;
         for (long pos = 0; pos < total; pos += BLOCK) {
+            Engineer.checkStop();
             int n = (int) Math.min(BLOCK, total - pos);
             for (int i = 0; i < n; i++) {
                 long p = pos + i;

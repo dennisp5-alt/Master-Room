@@ -45,6 +45,7 @@ final class FirFilter {
         int d = (len - 1) / 2;
         double[] re = new double[nfft], im = new double[nfft];
         for (long s = -d; s - d + len - 1 < x.length + (long) hop; s += hop) {
+            Engineer.checkStop();
             java.util.Arrays.fill(im, 0);
             for (int i = 0; i < nfft; i++) {
                 long p = s + i;

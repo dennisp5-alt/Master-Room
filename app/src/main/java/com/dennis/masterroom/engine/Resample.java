@@ -30,6 +30,7 @@ final class Resample {
         int out = (int) Math.round((double) x.length * to / from);
         float[] y = new float[out];
         for (int n = 0; n < out; n++) {
+            if ((n & 0xFFFF) == 0) Engineer.checkStop();
             long pos = (long) n * down;
             int base = (int) (pos / up), phase = (int) (pos % up);
             double s = 0;

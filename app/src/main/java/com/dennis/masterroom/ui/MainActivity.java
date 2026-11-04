@@ -117,7 +117,7 @@ public final class MainActivity extends Activity {
     private static final List<Item> items = new ArrayList<>();
     private static final List<Integer> order = new ArrayList<>();
     private static int selected, blind = BLIND_OFF, pickedShown = -1, runningStage = -1, progressNow;
-    private static boolean matchBeforeBlind = true, saving, working, importing, openCompareNext;
+    private static boolean matchBeforeBlind = true, saving, working, rendering, stopping, importing, openCompareNext;
     private static double[] targetMid;
     private static File sessionDir;
     private static Preview.Mode previewMode = Preview.Mode.FULL;
@@ -380,7 +380,7 @@ public final class MainActivity extends Activity {
         }
         pathPanel.addView(path, Parts.line(Parts.WRAP, 5));
 
-        masterButton = parts.gold("MASTER IT", v -> master());
+        masterButton = parts.gold("MASTER IT", v -> { if (rendering) stopRender(); else master(); });
         Look.enable(masterButton, false);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
@@ -996,6 +996,8 @@ public final class MainActivity extends Activity {
         String why = e instanceof OutOfMemoryError ? "The phone ran out of memory for this song" : String.valueOf(e.getMessage());
         main.post(() -> {
             working = false;
+            rendering = false;
+            stopping = false;
             statusNow = why;
             java.util.Arrays.fill(stageDone, false);
             runningStage = -1;
@@ -1010,8 +1012,15 @@ public final class MainActivity extends Activity {
     }
 
     private void applyBusy() {
-        if (working) {
-            masterButton.setText("MASTERING");
+        if (rendering) {
+            // While a render runs this is the way out of a wrong setting.
+            masterButton.setText(stopping ? "STOPPING" : "STOP MASTERING");
+            masterButton.setEnabled(!stopping);
+            masterButton.setAlpha(1f);
+            masterButton.setBackground(Look.shape(Look.PANEL, stopping ? Look.LINE : Look.AMBER, 7));
+            masterButton.setTextColor(stopping ? Look.DIM : Look.AMBER);
+        } else if (working) {
+            masterButton.setText("WORKING");
             masterButton.setEnabled(false);
             masterButton.setAlpha(1f);
             masterButton.setBackground(Look.shape(Look.PANEL, Look.LINE, 7));
@@ -1032,6 +1041,27 @@ public final class MainActivity extends Activity {
         applyBusy();
     }
 
+    private void stopRender() {
+        stopping = true;
+        Engineer.requestStop(true);
+        applyBusy();
+        status("Stopping");
+    }
+
+    /** Back to the session with the song still loaded, ready for the right settings. */
+    private static void stopped() {
+        working = false;
+        rendering = false;
+        stopping = false;
+        Engineer.requestStop(false);
+        java.util.Arrays.fill(stageDone, false);
+        runningStage = -1;
+        progressNow = 0;
+        statusNow = "Stopped. Choose your settings and press Master It.";
+        RenderService.end(app, null);
+        ui(a -> { a.applyBusy(); a.lightPath(-1); a.statusLine.setText(statusNow); });
+    }
+
     // Mastering ---------------------------------------------------------------
 
     private void master() {
@@ -1042,6 +1072,9 @@ public final class MainActivity extends Activity {
         final String styleName = style.name();
         final List<String> log = tasteLog();
         measureToken++;
+        rendering = true;
+        stopping = false;
+        Engineer.requestStop(false);
         player.clear(); order.clear(); items.clear(); selected = 0;
         blind = BLIND_OFF; pickedShown = -1;
         player.setMatched(true);
@@ -1115,6 +1148,9 @@ public final class MainActivity extends Activity {
                 sheet = text;
                 main.post(() -> {
                     working = false;
+                    rendering = false;
+                    stopping = false;
+                    Engineer.requestStop(false);
                     items.addAll(made);
                     for (int i = 0; i < player.size(); i++) order.add(i);
                     selected = 0;
@@ -1126,6 +1162,9 @@ public final class MainActivity extends Activity {
                     RenderService.end(app, "Your takes are ready to compare");
                     ui(a -> { a.finishRender(text); });
                 });
+            } catch (Engineer.Stopped e) {
+                player.clear();
+                main.post(MainActivity::stopped);
             } catch (Throwable e) {
                 fail(e);
             } finally {

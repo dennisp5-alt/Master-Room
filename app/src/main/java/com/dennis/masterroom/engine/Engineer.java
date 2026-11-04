@@ -47,6 +47,13 @@ public final class Engineer {
 
     public interface Progress { void at(String step, int percent); }
 
+    /** Thrown inside a render when you press Stop. */
+    public static final class Stopped extends RuntimeException { }
+
+    private static volatile boolean stop;
+    public static void requestStop(boolean on) { stop = on; }
+    static void checkStop() { if (stop) throw new Stopped(); }
+
     /** One line of the session sheet: the song as it left a stage. */
     public static final class Point {
         public final String stage; public final double lufs, lra, truePeak;
@@ -308,6 +315,21 @@ public final class Engineer {
         double excess = Math.max(0, peak - ceilingDb);
         double clipShare = Math.min(take.maxClipDb, take.clipPortion * excess);
         return new Stack(rate, gainDb, Math.max(ceilingDb, peak - clipShare), clipShare, ceilingDb);
+    }
+
+    /** Test hook: the audio into and out of the loudness stage for one take. */
+    static Audio[] trial(Session s, Recipe take, double asked) {
+        Result r = new Result();
+        Audio a = s.prepared.copy();
+        VariMu.apply(a, take.compressDb, 2 + take.compressDb, take.attackMs, 180, 1400);
+        final double op = -18 - Loudness.measure(a).integrated;
+        final Audio src = a;
+        if (take.valve > 0) a = Oversample.run4x(src, rate -> new Tone(rate, op, take.valve, take.iron, take.tape));
+        double ceiling = ceilingFor(asked), robust = robustPeak(a);
+        Loudness.Result loud = Loudness.measure(a);
+        double gain = search(a, loud, asked, ceiling, robust, take);
+        Rendered f = render(a, loud, gain, robust, ceiling, take, true);
+        return new Audio[]{a.gained(gain), f.audio};
     }
 
     private static final class Rendered { Audio audio; Stack.Stats stats; double lufs; }

@@ -201,6 +201,19 @@ public class UiSmokeTest {
         shot("session_bottom");
         checkTargets();
 
+        // Stop: a wrong press can be stopped, and the song stays loaded and ready.
+        tap("-12");
+        tap("MASTER IT");
+        SystemClock.sleep(2500);
+        shot("session_stop_available");
+        tap("STOP MASTERING");
+        waitFor("render to stop", 60000, () -> find("MASTER IT") != null && hasText("Stopped."));
+        assertTrue(find("MASTER IT").isEnabled());
+        assertTrue("Song stays loaded", hasText("Test_Song"));
+        assertTrue("Nothing half-made to compare", find("COMPARE") == null);
+        shot("session_stopped");
+        tap("-14");
+
         tap("START ALBUM");
         assertTrue(hasText("save a take to set its sound"));
         scroll(false);
@@ -208,6 +221,7 @@ public class UiSmokeTest {
         tap("MASTER IT");
         SystemClock.sleep(3000);
         scroll(true);
+        assertNotNull("Stop is on offer while mastering", find("STOP MASTERING"));
         shot("session_rendering");
         // The render must survive leaving the app and the screen being closed.
         ins.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME);
