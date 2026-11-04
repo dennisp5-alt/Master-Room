@@ -100,7 +100,7 @@ public final class MainActivity extends Activity {
 
     private TextView albumLine, tasteLine, previewNote;
     private Button albumButton, manageButton;
-    private LinearLayout shelfList, previewRow, releasePanel;
+    private LinearLayout dock, shelfList, previewRow, releasePanel;
     private ImageView releaseChevron;
     private EditText titleField, artistField, albumField, yearField, trackField, isrcField;
 
@@ -137,14 +137,15 @@ public final class MainActivity extends Activity {
         compareScreen.setVisibility(View.GONE);
         root.addView(sessionScreen);
         root.addView(compareScreen);
-        // Fixed studio transport action, independent of the scrollable session controls.
-        FrameLayout.LayoutParams action = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, Look.dp(58), Gravity.BOTTOM);
-        action.leftMargin = Look.dp(15);
-        action.rightMargin = Look.dp(15);
-        action.bottomMargin = Look.dp(12);
-        masterButton.setElevation(Look.dp(8));
-        root.addView(masterButton, action);
+        // Status, progress and the main action share one solid dock, so nothing shows through.
+        dock = new LinearLayout(this);
+        dock.setOrientation(LinearLayout.VERTICAL);
+        dock.setPadding(Look.dp(15), Look.dp(6), Look.dp(15), Look.dp(12));
+        dock.setBackgroundColor(Look.BG);
+        dock.addView(statusLine, Parts.line(Parts.WRAP, 0));
+        dock.addView(progress, Parts.line(Parts.WRAP, 4));
+        dock.addView(masterButton, Parts.line(Look.dp(58), 6));
+        root.addView(dock, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
         setContentView(root);
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 9);
@@ -194,7 +195,7 @@ public final class MainActivity extends Activity {
     private void showCompare(boolean on) {
         compareScreen.setVisibility(on ? View.VISIBLE : View.GONE);
         sessionScreen.setVisibility(on ? View.GONE : View.VISIBLE);
-        masterButton.setVisibility(on ? View.GONE : View.VISIBLE);
+        dock.setVisibility(on ? View.GONE : View.VISIBLE);
     }
 
     private ScrollView screen() {
@@ -212,8 +213,8 @@ public final class MainActivity extends Activity {
 
     private ScrollView buildSession() {
         ScrollView s = screen();
-        // Reserve scroll space for the fixed bottom action, including on small phones.
-        s.setPadding(0, 0, 0, Look.dp(82));
+        // Reserve scroll space for the fixed dock, including on small phones.
+        s.setPadding(0, 0, 0, Look.dp(116));
         s.setClipToPadding(false);
         LinearLayout header = parts.row();
         ImageView mark = new ImageView(this);
@@ -381,9 +382,9 @@ public final class MainActivity extends Activity {
         progress.setMax(100);
         progress.setProgressTintList(ColorStateList.valueOf(Look.AMBER));
         progress.setVisibility(View.GONE);
-        column.addView(progress, Parts.line(Parts.WRAP, 7));
         statusLine = parts.text("", Look.body, 13, Look.DIM);
-        column.addView(statusLine, Parts.line(Parts.WRAP, 5));
+        statusLine.setSingleLine(true);
+        statusLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
         return s;
     }
 
@@ -837,6 +838,7 @@ public final class MainActivity extends Activity {
             blindButton.setText("End blind test");
         }
         tasteLine.setText(Taste.summary(tasteLog()));
+        tasteLine.setVisibility(hide ? View.GONE : View.VISIBLE);
         Look.enable(blindButton, any && !importing);
         Look.enable(importButton, any && !hide && !working && !importing);
         Look.enable(playButton, any);
@@ -971,7 +973,18 @@ public final class MainActivity extends Activity {
     }
 
     private void applyBusy() {
-        Look.enable(masterButton, !working && songUri != null);
+        if (working) {
+            masterButton.setText("MASTERING");
+            masterButton.setEnabled(false);
+            masterButton.setAlpha(1f);
+            masterButton.setBackground(Look.shape(Look.PANEL, Look.LINE, 7));
+            masterButton.setTextColor(Look.DIM);
+        } else {
+            masterButton.setText("MASTER IT");
+            Look.surface(masterButton, Look.gold(7));
+            masterButton.setTextColor(Look.BG);
+            Look.enable(masterButton, songUri != null);
+        }
         progress.setVisibility(working ? View.VISIBLE : View.GONE);
         if (working) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);

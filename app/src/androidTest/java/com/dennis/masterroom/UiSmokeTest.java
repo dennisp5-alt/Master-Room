@@ -264,10 +264,7 @@ public class UiSmokeTest {
         scroll(true);
         tap("Start blind test");
         assertTrue(hasText("Version 1"));
-        for (String n : new String[]{"Source", "Clean", "Punch", "StemLab_Master"}) assertFalse(n + " leaked in blind test", hasText(n));
-        for (View v : visible()) {
-            if (v instanceof TextView && !hasTasteWords((TextView) v)) assertFalse("Name leaked", ((TextView) v).getText().toString().equals("Warm"));
-        }
+        for (String n : new String[]{"Source", "Clean", "Warm", "Punch", "Yours", "StemLab_Master"}) assertFalse(n + " leaked in blind test", hasText(n));
         assertFalse("Numbers leaked in blind test", hasText("-14.0"));
         assertFalse(hasText("Playback trim"));
         shot("blind_on");
@@ -326,8 +323,6 @@ public class UiSmokeTest {
         tap("END ALBUM");
         activity.finish();
     }
-
-    private boolean hasTasteWords(TextView t) { return t.getText().toString().contains("takes so far"); }
 
     private View firstWithText(String part) {
         for (View v : visible()) if (v instanceof TextView && ((TextView) v).getText().toString().contains(part)) return v;
