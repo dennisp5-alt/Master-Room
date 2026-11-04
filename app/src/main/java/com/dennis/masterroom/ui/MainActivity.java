@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
     private ScrollView sessionScreen, compareScreen;
     private LinearLayout column, styleRow, levelRow, versionList;
     private TextView songName, songMeta, songAction, measuredLufs, measuredPeak, measuredRange, ceilingLine;
-    private TextView referenceLine, statusLine, sheetText, selectedName, timeNow, matchLine, matchState, blindLine, blindState;
+    private TextView referenceLine, statusLine, sheetText, selectedName, timeNow, matchLine, matchState, blindLine, blindState, compareBadge;
     private Button compareLink, masterButton, takeButton, importButton, waveTab, toneTab, matchButton, blindButton;
     private ImageButton playButton;
     private ImageView sheetChevron;
@@ -140,7 +140,7 @@ public final class MainActivity extends Activity {
         s.setFillViewport(true);
         column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
-        column.setPadding(Look.dp(14), Look.dp(12), Look.dp(14), Look.dp(28));
+        column.setPadding(Look.dp(15), Look.dp(16), Look.dp(15), Look.dp(36));
         s.addView(column);
         return s;
     }
@@ -153,50 +153,71 @@ public final class MainActivity extends Activity {
         ImageView mark = new ImageView(this);
         mark.setImageResource(R.drawable.ic_mark);
         mark.setContentDescription("Master Room");
-        header.addView(mark, new LinearLayout.LayoutParams(Look.dp(30), Look.dp(30)));
-        TextView name = parts.text("MASTER ROOM", Look.title, 22, Look.TEXT);
-        name.setLetterSpacing(0.14f);
-        name.setPadding(Look.dp(10), 0, 0, 0);
-        header.addView(name);
+        header.addView(mark, new LinearLayout.LayoutParams(Look.dp(38), Look.dp(38)));
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
+        brand.setPadding(Look.dp(10), 0, 0, 0);
+        TextView name = parts.text("MASTER ROOM", Look.title, 24, Look.TEXT);
+        name.setLetterSpacing(0.15f);
+        brand.addView(name);
+        TextView tagline = parts.text("AUDIO MASTERING STUDIO", Look.label, 10, Look.AMBER);
+        tagline.setLetterSpacing(0.18f);
+        brand.addView(tagline);
+        header.addView(brand);
         header.addView(parts.grow());
         compareLink = parts.link("COMPARE", v -> showCompare(true));
         compareLink.setVisibility(View.GONE);
         header.addView(compareLink, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
-        column.addView(header, Parts.line(Look.dp(48), 0));
+        column.addView(header, Parts.line(Look.dp(56), 0));
 
         LinearLayout card = parts.row();
-        card.setPadding(Look.dp(14), Look.dp(10), Look.dp(14), Look.dp(10));
-        card.setMinimumHeight(Look.dp(64));
-        Look.surface(card, Look.metal(8));
+        card.setPadding(Look.dp(11), Look.dp(12), Look.dp(14), Look.dp(12));
+        card.setMinimumHeight(Look.dp(88));
+        Look.surface(card, Look.metal(12));
         card.setClickable(true);
         card.setOnClickListener(v -> pick(PICK_SONG));
+        TextView artwork = parts.text("♫", Look.title, 32, Look.AMBER);
+        artwork.setGravity(Gravity.CENTER);
+        artwork.setBackground(Look.shape(Look.WELL, Look.AMBER_DIM, 9));
+        artwork.setContentDescription("Track placeholder artwork");
+        LinearLayout.LayoutParams cover = new LinearLayout.LayoutParams(Look.dp(60), Look.dp(60));
+        cover.rightMargin = Look.dp(12);
+        card.addView(artwork, cover);
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
+        TextView sourceLabel = parts.text("CURRENT SESSION", Look.label, 10, Look.AMBER);
+        sourceLabel.setLetterSpacing(0.1f);
+        info.addView(sourceLabel);
         songName = parts.text("No song loaded", Look.strong, 18, Look.TEXT);
         songName.setSingleLine(true);
         songMeta = parts.text("WAV, or anything the phone can play", Look.mono, 12, Look.DIM);
         info.addView(songName);
         info.addView(songMeta);
         card.addView(info, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
-        songAction = parts.text("Load", Look.strong, 15, Look.AMBER);
+        songAction = parts.text("Load", Look.label, 16, Look.AMBER);
+        songAction.setPadding(Look.dp(10), Look.dp(12), Look.dp(2), Look.dp(12));
         card.addView(songAction);
         column.addView(card, Parts.line(Parts.WRAP, 6));
 
         LinearLayout monitor = parts.panel(10, column);
         monitor.addView(parts.label("SOURCE LOUDNESS"));
+        TextView meterDesc = parts.text("ANALOGUE MONITOR  ·  INTEGRATED LUFS", Look.label, 11, Look.AMBER_DIM);
+        meterDesc.setLetterSpacing(0.06f);
+        monitor.addView(meterDesc, Parts.line(Parts.WRAP, 4));
         FrameLayout well = new FrameLayout(this);
         well.setBackground(Look.shape(Look.WELL, Look.HAIR, 6));
         meter = new MeterView(this);
         well.addView(meter);
+        well.setClipToOutline(true);
         monitor.addView(well, Parts.line(Parts.WRAP, 6));
         LinearLayout tiles = parts.row();
         measuredLufs = parts.readout(tiles, "INTEGRATED", "LUFS", 0);
         measuredPeak = parts.readout(tiles, "TRUE PEAK", "dBTP", 6);
         measuredRange = parts.readout(tiles, "RANGE", "LU", 6);
-        monitor.addView(tiles, Parts.line(Parts.WRAP, 8));
+        monitor.addView(tiles, Parts.line(Parts.WRAP, 10));
 
         LinearLayout stylePanel = parts.panel(10, column);
-        stylePanel.addView(parts.label("STYLE"));
+        stylePanel.addView(parts.label("MASTERING STYLE"));
         styleRow = parts.row();
         stylePanel.addView(styleRow, Parts.line(Look.dp(48), 6));
         LinearLayout refs = parts.row();
@@ -207,7 +228,7 @@ public final class MainActivity extends Activity {
         drawStyles();
 
         LinearLayout levelPanel = parts.panel(10, column);
-        levelPanel.addView(parts.label("TARGET LOUDNESS, LUFS"));
+        levelPanel.addView(parts.label("TARGET LOUDNESS  ·  LUFS"));
         levelRow = parts.row();
         levelPanel.addView(levelRow, Parts.line(Look.dp(48), 6));
         ceilingLine = parts.text("", Look.mono, 12, Look.DIM);
@@ -222,20 +243,29 @@ public final class MainActivity extends Activity {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(Gravity.CENTER_HORIZONTAL);
-            View led = new View(this);
-            leds[i] = led;
-            cell.addView(led, new LinearLayout.LayoutParams(Look.dp(9), Look.dp(9)));
-            TextView t = parts.text(STAGES[i], Look.label, 14, Look.MID);
-            t.setPadding(0, Look.dp(6), 0, 0);
+            cell.setPadding(0, Look.dp(9), 0, Look.dp(9));
+            cell.setBackground(Look.shape(Look.WELL, Look.HAIR, 7));
+            String[] symbols = {"≋", "▥", "◉", "◇", "⌁", "▣"};
+            TextView glyph = parts.text(symbols[i], Look.strong, 20, Look.AMBER);
+            glyph.setGravity(Gravity.CENTER);
+            cell.addView(glyph, new LinearLayout.LayoutParams(Parts.MATCH, Look.dp(28)));
+            TextView t = parts.text(STAGES[i], Look.label, 12, Look.MID);
             t.setGravity(Gravity.CENTER);
             cell.addView(t);
-            path.addView(cell, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+            View led = new View(this);
+            leds[i] = led;
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(Look.dp(7), Look.dp(7));
+            lp.topMargin = Look.dp(6);
+            cell.addView(led, lp);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, Parts.WRAP, 1);
+            cp.leftMargin = i == 0 ? 0 : Look.dp(4);
+            path.addView(cell, cp);
         }
         pathPanel.addView(path, Parts.line(Parts.WRAP, 8));
 
         masterButton = parts.gold("MASTER IT", v -> master());
         Look.enable(masterButton, false);
-        column.addView(masterButton, Parts.line(Look.dp(60), 12));
+        column.addView(masterButton, Parts.line(Look.dp(64), 16));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
         progress.setProgressTintList(ColorStateList.valueOf(Look.AMBER));
@@ -349,27 +379,38 @@ public final class MainActivity extends Activity {
         back.setContentDescription("Back");
         back.setOnClickListener(v -> showCompare(false));
         header.addView(back, new LinearLayout.LayoutParams(Look.dp(48), Look.dp(48)));
-        TextView title = parts.text("COMPARE", Look.title, 22, Look.TEXT);
+        LinearLayout compareBrand = new LinearLayout(this);
+        compareBrand.setOrientation(LinearLayout.VERTICAL);
+        TextView title = parts.text("COMPARE", Look.title, 24, Look.TEXT);
         title.setLetterSpacing(0.14f);
-        header.addView(title);
-        column.addView(header, Parts.line(Look.dp(48), 0));
+        compareBrand.addView(title);
+        compareBrand.addView(parts.text("A/B MASTERING MONITOR", Look.label, 10, Look.AMBER_DIM));
+        header.addView(compareBrand);
+        header.addView(parts.grow());
+        compareBadge = parts.text("LEVEL MATCHED", Look.label, 12, Look.AMBER);
+        compareBadge.setGravity(Gravity.CENTER);
+        compareBadge.setPadding(Look.dp(9), Look.dp(8), Look.dp(9), Look.dp(8));
+        compareBadge.setBackground(Look.shape(Look.WELL, Look.AMBER, 6));
+        header.addView(compareBadge);
+        column.addView(header, Parts.line(Look.dp(58), 0));
 
-        LinearLayout display = parts.panel(6, column);
+        LinearLayout display = parts.panel(8, column);
+        display.addView(parts.label("LISTENING ROOM"));
         LinearLayout tabs = parts.row();
         waveTab = parts.segment("WAVE", true, Look.label, v -> showTone(false));
         toneTab = parts.segment("TONE", false, Look.label, v -> showTone(true));
         tabs.addView(waveTab);
         tabs.addView(toneTab);
-        display.addView(tabs, Parts.line(Look.dp(48), 0));
+        display.addView(tabs, Parts.line(Look.dp(50), 9));
         FrameLayout well = new FrameLayout(this);
         well.setPadding(Look.dp(8), Look.dp(8), Look.dp(8), Look.dp(6));
         well.setBackground(Look.shape(Look.WELL, Look.HAIR, 6));
         wave = new WaveView(this);
         wave.setSeek(player::seek);
-        well.addView(wave, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(190)));
+        well.addView(wave, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(185)));
         tone = new ToneView(this);
         tone.setVisibility(View.GONE);
-        well.addView(tone, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(190)));
+        well.addView(tone, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(185)));
         display.addView(well, Parts.line(Parts.WRAP, 8));
 
         LinearLayout now = parts.row();
@@ -417,7 +458,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout columns = parts.row();
         columns.setPadding(Look.dp(12), 0, Look.dp(12), 0);
-        columns.addView(parts.label("MASTERS"), new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        columns.addView(parts.label("MASTER VERSIONS"), new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
         addColumn(columns, parts.label("LUFS"), 60);
         addColumn(columns, parts.label("dBTP"), 54);
         addColumn(columns, parts.label("LRA LU"), 58);
@@ -533,15 +574,37 @@ public final class MainActivity extends Activity {
             Item item = items.get(order.get(i));
             boolean on = i == selected;
             LinearLayout r = parts.row();
-            r.setPadding(Look.dp(12), Look.dp(6), Look.dp(12), Look.dp(6));
-            r.setMinimumHeight(Look.dp(60));
-            Look.surface(r, on ? Look.shape(Look.RAISED, Look.AMBER, 8) : Look.metal(8));
+            r.setPadding(Look.dp(11), Look.dp(12), Look.dp(11), Look.dp(12));
+            r.setMinimumHeight(Look.dp(74));
+            GradientDrawable selection = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{0xFF3A2C1D, 0xFF211D1A});
+            selection.setCornerRadius(Look.dp(10));
+            selection.setStroke(Look.dp(1), Look.AMBER);
+            Look.surface(r, on ? selection : Look.metal(10));
+            View indicator = new View(this);
+            indicator.setBackground(Look.shape(on ? Look.AMBER : Look.LINE, 0, 10));
+            LinearLayout.LayoutParams dot = new LinearLayout.LayoutParams(Look.dp(11), Look.dp(11));
+            dot.rightMargin = Look.dp(11);
+            r.addView(indicator, dot);
             r.setClickable(true);
             r.setOnClickListener(v -> select(shown));
             LinearLayout names = new LinearLayout(this);
             names.setOrientation(LinearLayout.VERTICAL);
             String blindName = "Version " + (i + 1);
-            names.addView(parts.text(hide ? blindName : item.name, Look.label, 20, on ? Look.AMBER : Look.TEXT));
+            TextView versionTitle = parts.text(hide ? blindName : item.name, Look.label, 20, on ? Look.AMBER : Look.TEXT);
+            versionTitle.setSingleLine(true);
+            versionTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            names.addView(versionTitle);
+            if (!hide && blind != BLIND_RESULTS) {
+                String detail = order.get(i) == 0 ? "ORIGINAL AUDIO"
+                        : "Clean".equals(item.name) ? "TRANSPARENT / NEUTRAL"
+                        : "Warm".equals(item.name) ? "ANALOGUE COLOUR"
+                        : "Punch".equals(item.name) ? "TRANSIENT IMPACT" : "IMPORTED MASTER";
+                TextView versionDetail = parts.text(detail, Look.label, 10, Look.DIM);
+                versionDetail.setSingleLine(true);
+                versionDetail.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                names.addView(versionDetail);
+            }
             if (blind == BLIND_RESULTS) {
                 names.addView(parts.text(i == pickedShown ? blindName + ", your pick" : blindName, Look.body, 12, i == pickedShown ? Look.AMBER : Look.DIM));
             }
@@ -551,7 +614,7 @@ public final class MainActivity extends Activity {
             addNumber(r, hide ? "" : number(item.lra), 58, Look.MID);
             r.setContentDescription(hide ? blindName : item.name + ", " + number(item.lufs) + " LUFS, " + number(item.truePeak)
                     + " dBTP, " + number(item.lra) + " LU" + (on ? ", selected" : ""));
-            versionList.addView(r, Parts.line(Parts.WRAP, i == 0 ? 0 : 6));
+            versionList.addView(r, Parts.line(Parts.WRAP, i == 0 ? 0 : 8));
         }
     }
 
@@ -574,6 +637,9 @@ public final class MainActivity extends Activity {
 
         boolean matched = player.isMatched();
         matchState.setText(matched ? "ON" : "OFF");
+        compareBadge.setText(matched ? "LEVEL MATCHED" : "UNMATCHED");
+        compareBadge.setTextColor(matched ? Look.AMBER : Look.DIM);
+        compareBadge.setBackground(Look.shape(Look.WELL, matched ? Look.AMBER : Look.LINE, 6));
         matchState.setTextColor(matched ? Look.BG : Look.TEXT);
         matchState.setBackground(matched ? Look.gold(4) : Look.shape(Look.WELL, Look.LINE, 4));
         matchButton.setText(matched ? "Turn level match off" : "Turn level match on");
