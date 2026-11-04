@@ -12,9 +12,9 @@ import android.widget.TextView;
 
 /** The studio look: colours, type and the surfaces every screen shares. */
 final class Look {
-    static final int BG = 0xFF121316, PANEL = 0xFF1E2024, PANEL_TOP = 0xFF2A2C31, RAISED = 0xFF2C2E34, WELL = 0xFF0A0B0D;
-    static final int LINE = 0xFF3F4249, HAIR = 0xFF2D2F35, TEXT = 0xFFEFEAE2, MID = 0xFFCBC8C1, DIM = 0xFFA8ABB1;
-    static final int AMBER = 0xFFF2B04A, GOLD_HI = 0xFFF8C76F, GOLD_LO = 0xFFDF9A30, AMBER_DIM = 0xFF8A6A33, BLUE = 0xFF7CBDEB, HOT = 0xFFE0694F;
+    static final int BG = 0xFF0A0D12, PANEL = 0xFF141922, PANEL_TOP = 0xFF242A35, RAISED = 0xFF242A33, WELL = 0xFF07090D;
+    static final int LINE = 0xFF414751, HAIR = 0xFF303741, TEXT = 0xFFF7F4EE, MID = 0xFFD5D3CE, DIM = 0xFFA5ADB9;
+    static final int AMBER = 0xFFFFB83D, GOLD_HI = 0xFFFFD47A, GOLD_LO = 0xFFE39C24, AMBER_DIM = 0xFF987142, BLUE = 0xFF78BDD9, HOT = 0xFFD96C4B;
 
     static Typeface body, strong, label, title, mono;
     private static float density = 1;
@@ -56,15 +56,16 @@ final class Look {
 
     /** A brushed-metal rack surface: a slight top-to-bottom fall with a fine edge. */
     static GradientDrawable metal(float radiusDp) {
-        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{PANEL_TOP, PANEL});
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{PANEL_TOP, 0xFF1B2029, PANEL});
         d.setCornerRadius(dp(radiusDp));
         d.setStroke(Math.max(1, dp(1)), LINE);
         return d;
     }
 
     static GradientDrawable gold(float radiusDp) {
-        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{GOLD_HI, GOLD_LO});
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{GOLD_HI, AMBER, GOLD_LO});
         d.setCornerRadius(dp(radiusDp));
+        d.setStroke(Math.max(1, dp(1)), 0xFFFFD88D);
         return d;
     }
 
