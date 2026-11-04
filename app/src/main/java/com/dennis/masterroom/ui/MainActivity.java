@@ -109,6 +109,14 @@ public final class MainActivity extends Activity {
         compareScreen.setVisibility(View.GONE);
         root.addView(sessionScreen);
         root.addView(compareScreen);
+        // Fixed studio transport action, independent of the scrollable session controls.
+        FrameLayout.LayoutParams action = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, Look.dp(58), Gravity.BOTTOM);
+        action.leftMargin = Look.dp(15);
+        action.rightMargin = Look.dp(15);
+        action.bottomMargin = Look.dp(12);
+        masterButton.setElevation(Look.dp(8));
+        root.addView(masterButton, action);
         setContentView(root);
         refreshReferences();
         refreshCeiling();
@@ -132,6 +140,7 @@ public final class MainActivity extends Activity {
     private void showCompare(boolean on) {
         compareScreen.setVisibility(on ? View.VISIBLE : View.GONE);
         sessionScreen.setVisibility(on ? View.GONE : View.VISIBLE);
+        masterButton.setVisibility(on ? View.GONE : View.VISIBLE);
     }
 
     private ScrollView screen() {
@@ -149,6 +158,9 @@ public final class MainActivity extends Activity {
 
     private ScrollView buildSession() {
         ScrollView s = screen();
+        // Reserve scroll space for the fixed bottom action, including on small phones.
+        s.setPadding(0, 0, 0, Look.dp(82));
+        s.setClipToPadding(false);
         LinearLayout header = parts.row();
         ImageView mark = new ImageView(this);
         mark.setImageResource(R.drawable.ic_mark);
@@ -288,7 +300,6 @@ public final class MainActivity extends Activity {
 
         masterButton = parts.gold("MASTER IT", v -> master());
         Look.enable(masterButton, false);
-        column.addView(masterButton, Parts.line(Look.dp(58), 10));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
         progress.setProgressTintList(ColorStateList.valueOf(Look.AMBER));
