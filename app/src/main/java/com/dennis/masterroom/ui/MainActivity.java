@@ -699,7 +699,11 @@ public final class MainActivity extends Activity {
                 if (i >= 0) { String n = c.getString(i); int dot = n.lastIndexOf('.'); return dot > 0 ? n.substring(0, dot) : n; }
             }
         } catch (RuntimeException ignored) { }
-        return "song";
+        String last = uri.getLastPathSegment();
+        if (last == null || last.isEmpty()) return "song";
+        last = last.substring(last.lastIndexOf('/') + 1);
+        int dot = last.lastIndexOf('.');
+        return dot > 0 ? last.substring(0, dot) : last;
     }
 
     private void status(String s) { main.post(() -> statusLine.setText(s)); }

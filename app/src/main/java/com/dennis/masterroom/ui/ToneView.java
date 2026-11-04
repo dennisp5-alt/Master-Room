@@ -12,12 +12,12 @@ import com.dennis.masterroom.engine.Listen;
 /** What the master did to the tone: the source and the chosen take against the target. */
 final class ToneView extends View {
     private static final int FIRST = 3, LAST = 28;
-    private static final double TOP = 4, BOTTOM = -10;
-    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private double[] source, take;
     private String takeName = "";
     private boolean hidden;
+    private double top = 4, bottom = -10;
 
     ToneView(Context c) {
         super(c);
@@ -39,15 +39,22 @@ final class ToneView extends View {
 
     void show(double[] source, double[] take, String takeName, boolean hidden) {
         this.source = source; this.take = take; this.takeName = takeName; this.hidden = hidden;
+        top = 4; bottom = -10;
+        for (double[] d : new double[][]{source, take}) {
+            if (d == null) continue;
+            for (int b = FIRST; b <= LAST; b++) {
+                top = Math.max(top, Math.ceil(d[b]));
+                bottom = Math.min(bottom, Math.floor(d[b]));
+            }
+        }
         invalidate();
     }
 
     private float x(int band) { return Look.dp(8) + (band - FIRST) * (getWidth() - Look.dp(16f)) / (float) (LAST - FIRST); }
 
     private float y(double db) {
-        float top = Look.dp(26), plot = getHeight() - Look.dp(48);
-        double v = Math.max(BOTTOM, Math.min(TOP, db));
-        return top + (float) ((TOP - v) / (TOP - BOTTOM)) * plot;
+        float from = Look.dp(26), plot = getHeight() - Look.dp(48);
+        return from + (float) ((top - db) / (top - bottom)) * plot;
     }
 
     private void curve(Canvas c, double[] data, int color, float widthDp) {
@@ -97,6 +104,10 @@ final class ToneView extends View {
         int[] marks = {4, 10, 17, 24};
         String[] names = {"50", "200", "1k", "5k"};
         for (int i = 0; i < marks.length; i++) c.drawText(names[i], x(marks[i]), getHeight() - Look.dp(4), paint);
+        paint.setTextAlign(Paint.Align.RIGHT);
+        paint.setTextSize(Look.dp(11));
+        c.drawText(String.format(java.util.Locale.US, "%+.0f dB", top), getWidth(), y(top) + Look.dp(4), paint);
+        c.drawText(String.format(java.util.Locale.US, "%+.0f dB", bottom), getWidth(), y(bottom) + Look.dp(4), paint);
         paint.setTypeface(Look.body);
         paint.setTextSize(Look.dp(13));
         paint.setTextAlign(Paint.Align.LEFT);
