@@ -117,17 +117,23 @@ public class UiSmokeTest {
         throw new AssertionError("Timed out waiting for " + what);
     }
 
+    private View clickableParent(View v) {
+        View t = v;
+        while (t != null && !t.isClickable()) t = t.getParent() instanceof View ? (View) t.getParent() : null;
+        return t;
+    }
+
     private void tap(String wanted) throws Exception {
-        View v = find(wanted);
-        assertNotNull("No control: " + wanted, v);
-        onUi(() -> {
-            View t = v;
-            while (t != null && !t.isClickable()) t = t.getParent() instanceof View ? (View) t.getParent() : null;
-            assertNotNull("Not tappable: " + wanted, t);
-            assertTrue("Disabled: " + wanted, t.isEnabled());
-            t.performClick();
-            return true;
-        });
+        View target = null;
+        for (View v : visible()) {
+            boolean named = (v instanceof TextView && wanted.contentEquals(((TextView) v).getText()))
+                    || (v.getContentDescription() != null && wanted.contentEquals(v.getContentDescription()));
+            if (named && clickableParent(v) != null) { target = clickableParent(v); break; }
+        }
+        assertNotNull("No control: " + wanted, target);
+        final View t = target;
+        assertTrue("Disabled: " + wanted, t.isEnabled());
+        onUi(() -> { t.performClick(); return true; });
         ins.waitForIdleSync();
     }
 
