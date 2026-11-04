@@ -130,6 +130,19 @@ public final class Distortion {
         r.spots.add(s);
     }
 
+    /** Adds the flagged moments to a 10 ms map of where the clipper must stand back. */
+    static float[] calm(Report r, float[] map, double seconds) {
+        int n = (int) (seconds * 100) + 2;
+        float[] out = new float[n];
+        java.util.Arrays.fill(out, 1);
+        if (map != null) System.arraycopy(map, 0, out, 0, Math.min(n, map.length));
+        for (Spot s : r.spots) {
+            int from = Math.max(0, (int) ((s.startSeconds - 0.03) * 100)), to = Math.min(n - 1, (int) ((s.endSeconds + 0.03) * 100));
+            for (int i = from; i <= to; i++) out[i] = 0;
+        }
+        return out;
+    }
+
     /** Flat-topped peaks already in the file: damage mastering did not add and cannot undo. */
     public static int flatPeaks(Audio a) {
         return flat(a.l) + flat(a.r);

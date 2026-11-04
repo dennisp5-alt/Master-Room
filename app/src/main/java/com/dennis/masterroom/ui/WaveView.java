@@ -18,11 +18,16 @@ final class WaveView extends View {
     private float[] bars = new float[0];
     private double fraction, length;
     private Seek seek;
+    private double[] marks = new double[0];
+    private boolean[] serious = new boolean[0];
 
     WaveView(Context c) {
         super(c);
         setContentDescription("Waveform timeline. Tap to move through the song");
     }
+
+    /** Places that may need a listen: fractions of the song, red when likely audible. */
+    void setMarks(double[] where, boolean[] audible) { marks = where; serious = audible; invalidate(); }
 
     void setBars(float[] b) { bars = b == null ? new float[0] : b; invalidate(); }
     void setLength(double seconds) { length = seconds; invalidate(); }
@@ -60,6 +65,11 @@ final class WaveView extends View {
             float size = Math.max(Look.dp(3), bars[i] * (h - Look.dp(6)));
             paint.setColor(i < head ? Look.AMBER : Look.AMBER_DIM);
             c.drawRect(i * step, mid - size / 2, i * step + width, mid + size / 2, paint);
+        }
+        for (int i = 0; i < marks.length; i++) {
+            paint.setColor(serious[i] ? Look.HOT : Look.AMBER);
+            float x = (float) marks[i] * w;
+            c.drawRect(x, 0, x + Look.dp(3), Look.dp(12), paint);
         }
         paint.setColor(Look.LINE);
         c.drawRect(0, h, w, h + Look.dp(1), paint);

@@ -66,6 +66,7 @@ public final class Engineer {
 
     public static final class Session {
         public Listen before;
+        public int sourceFlatPeaks;
         public Target target;
         Eq.Moves moves;
         public final List<String> notes = new ArrayList<>();
@@ -85,6 +86,8 @@ public final class Engineer {
         public final List<Point> stages = new ArrayList<>();
         public final List<String> notes = new ArrayList<>();
         public double seconds;
+        public Distortion.Report distortion;
+        public String verdict = "";
     }
 
     /** Spotify asks for true peak below -2 dB on masters louder than -14 LUFS. */
@@ -120,6 +123,9 @@ public final class Engineer {
             s.notes.add("Repairs: no clicks or dropouts found");
         }
 
+        int flat = Distortion.flatPeaks(in);
+        if (flat > 0) s.notes.add("Source: " + flat + " flat-topped peaks already in the file. Mastering cannot undo these");
+        s.sourceFlatPeaks = flat;
         double limit = (target.measured ? 3.0 : 2.0) + 1.0;
         double[] wanted = intended(m);
         p.at("Linear-phase EQ, mid and side", 8);
@@ -216,7 +222,8 @@ public final class Engineer {
         Audio pre = a;
         double robust = robustPeak(pre);
         Loudness.Result preLoud = Loudness.measure(pre);
-        double gain = search(pre, preLoud, askedLufs, r.ceilingDb, robust, take);
+        Level level = search(pre, preLoud, askedLufs, r.ceilingDb, robust, take);
+        double gain = level.gain;
         // The compressor, colour and clipper can all take low end away. Check, then put back.
         p.at(take.label + ": checking the low end", 66);
         Listen quick = Listen.tone(render(pre, preLoud, gain, robust, r.ceilingDb, take, false).audio);
@@ -232,7 +239,8 @@ public final class Engineer {
             r.notes.add(String.format(Locale.US, "Low end put back after the chain: %+.1f dB lows, %+.1f dB low mids", lowFix, midFix));
             preLoud = Loudness.measure(pre);
             robust = robustPeak(pre);
-            gain = search(pre, preLoud, askedLufs, r.ceilingDb, robust, take);
+            level = search(pre, preLoud, askedLufs, r.ceilingDb, robust, take);
+            gain = level.gain;
         }
         double usedCeiling = r.ceilingDb - 0.05;
         Rendered best = null;
@@ -248,8 +256,9 @@ public final class Engineer {
             if (!peakOk) usedCeiling -= tp - r.ceilingDb + 0.02;
             double slope = attempt == 0 ? 0.6 : Math.max(0.15, Math.min(1, (now.lufs - lastGot) / Math.max(1e-3, gain - lastGain)));
             lastGain = gain; lastGot = now.lufs;
-            gain += Math.max(-2, Math.min(2, err / slope));
+            gain = Math.min(level.most, gain + Math.max(-2, Math.min(2, err / slope)));
         }
+        best = cleanUp(best, pre, preLoud, gain, level.most, robust, usedCeiling, askedLufs, take, r, p);
         Audio master = best.audio;
         Repair.edges(master);
         double over = Oversample.truePeakDb(master) - r.ceilingDb;
@@ -268,7 +277,7 @@ public final class Engineer {
         if (r.limiterMeanDb > 1.5 || r.over3Percent > 10)
             r.notes.add("This level is heavy work for this song. Compare it with a quieter version by ear");
         if (Math.abs(r.after.loudness.integrated - askedLufs) > 0.15)
-            r.notes.add(String.format(Locale.US, "Asked for %.1f LUFS, reached %.1f", askedLufs, r.after.loudness.integrated));
+            r.notes.add(String.format(Locale.US, "Asked for %.1f LUFS, stopped at %.1f to stay clean", askedLufs, r.after.loudness.integrated));
         r.seconds = (System.nanoTime() - t0) / 1e9;
         return r;
     }
@@ -310,33 +319,60 @@ public final class Engineer {
         return Listen.db(Control.percentile(peaks, n, 0.995));
     }
 
-    private static Stack stack(int rate, double gainDb, double robustDb, double ceilingDb, Recipe take) {
+    private static Stack stack(int rate, double gainDb, double robustDb, double ceilingDb, Recipe take, float[] calm) {
         double peak = robustDb + gainDb;
         double excess = Math.max(0, peak - ceilingDb);
         double clipShare = Math.min(take.maxClipDb, take.clipPortion * excess);
-        return new Stack(rate, gainDb, Math.max(ceilingDb, peak - clipShare), clipShare, ceilingDb);
-    }
-
-    /** Test hook: the audio into and out of the loudness stage for one take. */
-    static Audio[] trial(Session s, Recipe take, double asked) {
-        Result r = new Result();
-        Audio a = s.prepared.copy();
-        VariMu.apply(a, take.compressDb, 2 + take.compressDb, take.attackMs, 180, 1400);
-        final double op = -18 - Loudness.measure(a).integrated;
-        final Audio src = a;
-        if (take.valve > 0) a = Oversample.run4x(src, rate -> new Tone(rate, op, take.valve, take.iron, take.tape));
-        double ceiling = ceilingFor(asked), robust = robustPeak(a);
-        Loudness.Result loud = Loudness.measure(a);
-        double gain = search(a, loud, asked, ceiling, robust, take);
-        Rendered f = render(a, loud, gain, robust, ceiling, take, true);
-        return new Audio[]{a.gained(gain), f.audio};
+        return new Stack(rate, gainDb, Math.max(ceilingDb, peak - clipShare), clipShare, ceilingDb, calm);
     }
 
     private static final class Rendered { Audio audio; Stack.Stats stats; double lufs; }
 
+    /**
+     * The automatic check. If added distortion is likely to be heard, the clipper stands
+     * back at those moments and the limiter takes over. If that is not enough, the take
+     * comes down a little in level, because a clean master matters more than the number.
+     */
+    private static Rendered cleanUp(Rendered first, Audio pre, Loudness.Result preLoud, double startGain, double most, double robust, double ceiling,
+                                    double asked, Recipe take, Result r, Progress p) {
+        p.at(take.label + ": checking for distortion", 88);
+        Rendered best = first;
+        double gain = startGain;
+        Distortion.Report report = Distortion.check(pre.gained(gain), best.audio);
+        final int found = report.audible;
+        float[] calm = null;
+        for (int round = 0; round < 3 && !report.passed(); round++) {
+            p.at(take.label + ": easing clipping", 90 + round * 2);
+            calm = Distortion.calm(report, calm, pre.seconds());
+            double tryGain = round == 0 ? gain : gain - 0.4;
+            Rendered now = render(pre, preLoud, tryGain, robust, ceiling, take, true, calm);
+            if (round == 0 && asked - now.lufs > 0.08) {
+                tryGain = Math.min(most, tryGain + Math.min(0.6, (asked - now.lufs) / 0.6));
+                now = render(pre, preLoud, tryGain, robust, ceiling, take, true, calm);
+            }
+            Distortion.Report again = Distortion.check(pre.gained(tryGain), now.audio);
+            // Giving up level is only worth it if it actually removes spots.
+            if (again.audible >= report.audible && round > 0) break;
+            best = now;
+            gain = tryGain;
+            report = again;
+        }
+        r.distortion = report;
+        int fixed = Math.max(0, found - report.audible);
+        if (found == 0) r.verdict = report.borderline == 0 ? "Passed" : "Passed, " + report.borderline + " borderline";
+        else if (report.passed()) r.verdict = "Fixed " + fixed + " spot" + (fixed == 1 ? "" : "s") + ", passed";
+        else r.verdict = report.audible + " spot" + (report.audible == 1 ? "" : "s") + " may be audible";
+        r.notes.add("Distortion check: " + r.verdict);
+        return best;
+    }
+
     private static Rendered render(Audio pre, Loudness.Result preLoud, double gain, double robust, double ceiling, Recipe take, boolean full) {
+        return render(pre, preLoud, gain, robust, ceiling, take, full, null);
+    }
+
+    private static Rendered render(Audio pre, Loudness.Result preLoud, double gain, double robust, double ceiling, Recipe take, boolean full, float[] calm) {
         Stack[] holder = new Stack[1];
-        Oversample.Factory f = rate -> holder[0] = stack(rate, gain, robust, ceiling, take);
+        Oversample.Factory f = rate -> holder[0] = stack(rate, gain, robust, ceiling, take, calm);
         Audio out = full ? Oversample.run4x(pre, f) : Oversample.run1x(pre, f);
         Rendered r = new Rendered();
         r.audio = out; r.stats = holder[0].stats;
@@ -344,17 +380,34 @@ public final class Engineer {
         return r;
     }
 
+    /** Past this average, limiting flattens the song, so a take stops short of its target. */
+    private static final double MOST_LIMITING_DB = 1.5;
+
+    private static final class Level { double gain, most = Double.MAX_VALUE; }
+
     /** Quick 1x renders to find the gain; the real 4x render then only needs a nudge. */
-    private static double search(Audio pre, Loudness.Result preLoud, double asked, double ceiling, double robust, Recipe take) {
-        double gain = asked - preLoud.integrated, last = 0, lastGot = 0;
-        for (int i = 0; i < 6; i++) {
-            double got = render(pre, preLoud, gain, robust, ceiling, take, false).lufs;
-            double err = asked - got;
+    private static Level search(Audio pre, Loudness.Result preLoud, double asked, double ceiling, double robust, Recipe take) {
+        Level out = new Level();
+        double gain = asked - preLoud.integrated, last = 0, lastGot = 0, safe = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < 9; i++) {
+            Rendered now = render(pre, preLoud, gain, robust, ceiling, take, false);
+            if (now.stats.limiterMeanDb() > MOST_LIMITING_DB) {
+                out.most = Math.min(out.most, gain);
+                gain = safe > Double.NEGATIVE_INFINITY ? (safe + out.most) / 2 : gain - 1.5;
+                if (out.most - safe < 0.15) { gain = safe; break; }
+                continue;
+            }
+            safe = Math.max(safe, gain);
+            double err = asked - now.lufs;
             if (Math.abs(err) < 0.05) break;
-            double slope = i == 0 ? 0.6 : Math.max(0.15, Math.min(1.0, (got - lastGot) / Math.max(1e-3, gain - last)));
-            last = gain; lastGot = got;
-            gain += Math.max(-3, Math.min(3, err / slope));
+            double slope = i == 0 ? 0.6 : Math.max(0.15, Math.min(1.0, (now.lufs - lastGot) / Math.max(1e-3, gain - last)));
+            last = gain; lastGot = now.lufs;
+            double next = gain + Math.max(-3, Math.min(3, err / slope));
+            if (next >= out.most) next = (gain + out.most) / 2;
+            if (out.most - gain < 0.15 && err > 0) break;
+            gain = next;
         }
-        return gain;
+        out.gain = safe > Double.NEGATIVE_INFINITY && gain > safe ? safe : gain;
+        return out;
     }
 }

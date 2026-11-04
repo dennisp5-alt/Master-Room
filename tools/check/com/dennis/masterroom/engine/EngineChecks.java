@@ -134,6 +134,21 @@ public final class EngineChecks {
         Oversample.run4x(hits, r -> ds[0] = new Stack(r, 0, -3.5, 2, -6));
         check("Clipper still shaves drum hits", ds[0].stats.clipMaxDb > 1, String.format(Locale.US, "up to %.1f dB", ds[0].stats.clipMaxDb));
 
+        // Distortion: gain alone never counts, real clipping does, on any level.
+        Audio song = music(12, rate);
+        check("Identical audio passes the distortion check", Distortion.check(song, song).spots.isEmpty(), "");
+        check("Level changes are not distortion", Distortion.check(song, song.gained(-6)).spots.isEmpty(), "");
+        double top = 0;
+        for (int i = 0; i < song.frames(); i++) top = Math.max(top, Math.abs(song.l[i]));
+        Audio crushed = song.copy();
+        float cap = (float) (top * 0.25);
+        for (int i = 0; i < crushed.frames(); i++) {
+            crushed.l[i] = Math.max(-cap, Math.min(cap, crushed.l[i]));
+            crushed.r[i] = Math.max(-cap, Math.min(cap, crushed.r[i]));
+        }
+        Distortion.Report bad = Distortion.check(song, crushed);
+        check("Heavy clipping is caught", bad.audible > 0, bad.audible + " spots, worst " + Math.round(bad.worstDb) + " dB");
+
         // Previews: playback-only curves do what their names say.
         check("Phone preview loses deep bass", previewDb(Preview.Mode.PHONE, 60) < previewDb(Preview.Mode.PHONE, 1000) - 20, String.format(Locale.US, "60 Hz %.1f dB, 1 kHz %.1f dB", previewDb(Preview.Mode.PHONE, 60), previewDb(Preview.Mode.PHONE, 1000)));
         check("Phone preview keeps upper bass and top end", previewDb(Preview.Mode.PHONE, 250) > previewDb(Preview.Mode.PHONE, 1000) - 2 && previewDb(Preview.Mode.PHONE, 12000) > previewDb(Preview.Mode.PHONE, 1000) - 2,

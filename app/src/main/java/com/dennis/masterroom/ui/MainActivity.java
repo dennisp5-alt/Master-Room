@@ -35,6 +35,7 @@ import android.widget.Toast;
 
 import com.dennis.masterroom.R;
 import com.dennis.masterroom.engine.Audio;
+import com.dennis.masterroom.engine.Distortion;
 import com.dennis.masterroom.engine.Engineer;
 import com.dennis.masterroom.engine.Listen;
 import com.dennis.masterroom.engine.Preview;
@@ -71,6 +72,8 @@ public final class MainActivity extends Activity {
     private static final class Item {
         final String name; final double lufs, lra, truePeak; final double[] mid, side; final float[] bars; final File[] files;
         boolean saved;
+        Distortion.Report report;
+        String verdict = "";
         Item(String name, Listen l, float[] bars, File[] files) {
             this.name = name; lufs = l.loudness.integrated; lra = l.loudness.lra; truePeak = l.truePeakDb;
             mid = l.midDb; side = l.sideDb; this.bars = bars; this.files = files;
@@ -104,7 +107,9 @@ public final class MainActivity extends Activity {
     private int routeTick;
     private boolean lastSpeaker;
     private Button albumButton, manageButton;
-    private LinearLayout dock, shelfList, previewRow, releasePanel;
+    private LinearLayout dock, shelfList, previewRow, releasePanel, checkPanel, spotRows;
+    private TextView checkLine;
+    private Button backToTakes;
     private ImageView releaseChevron;
     private EditText titleField, artistField, albumField, yearField, trackField, isrcField;
 
@@ -122,6 +127,7 @@ public final class MainActivity extends Activity {
     private static File sessionDir;
     private static Preview.Mode previewMode = Preview.Mode.FULL;
     private static volatile int measureToken;
+    private static int sourceFlatPeaks;
 
     /** Runs on the screen that is showing now, if there is one. */
     private static void ui(Consumer<MainActivity> job) {
@@ -148,6 +154,13 @@ public final class MainActivity extends Activity {
         dock.setBackgroundColor(Look.BG);
         dock.addView(statusLine, Parts.line(Parts.WRAP, 0));
         dock.addView(progress, Parts.line(Parts.WRAP, 4));
+        // Always one tap back to finished takes, wherever you have ended up.
+        backToTakes = parts.button("BACK TO YOUR MASTERS", v -> showCompare(true));
+        Look.surface(backToTakes, Look.shape(Look.BG, Look.AMBER, 7));
+        Look.type(backToTakes, Look.title, 18, Look.AMBER);
+        backToTakes.setLetterSpacing(0.1f);
+        backToTakes.setVisibility(View.GONE);
+        dock.addView(backToTakes, Parts.line(Look.dp(50), 6));
         dock.addView(masterButton, Parts.line(Look.dp(58), 6));
         root.addView(dock, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
         setContentView(root);
@@ -483,7 +496,7 @@ public final class MainActivity extends Activity {
         if (step.contains("harsh")) return 1;
         if (step.contains("riding") || step.contains("bus compressor")) return 2;
         if (step.contains("colour")) return 3;
-        if (step.contains("level") || step.contains("low end")) return 4;
+        if (step.contains("level") || step.contains("low end") || step.contains("easing")) return 4;
         if (step.contains("clipper") || step.contains("checking")) return 5;
         return 0;
     }
@@ -599,6 +612,14 @@ public final class MainActivity extends Activity {
         dash.setStroke(Look.dp(1), Look.AMBER_DIM, Look.dp(5), Look.dp(4));
         Look.surface(importButton, dash);
         column.addView(importButton, Parts.line(Look.dp(52), 6));
+
+        checkPanel = parts.panel(10, column);
+        checkPanel.addView(parts.label("DISTORTION CHECK"));
+        checkLine = parts.text("", Look.body, 14, Look.TEXT);
+        checkPanel.addView(checkLine, Parts.line(Parts.WRAP, 6));
+        spotRows = new LinearLayout(this);
+        spotRows.setOrientation(LinearLayout.VERTICAL);
+        checkPanel.addView(spotRows, Parts.line(Parts.WRAP, 4));
 
         LinearLayout blindPanel = parts.panel(10, column);
         LinearLayout blindTop = parts.row();
@@ -805,7 +826,8 @@ public final class MainActivity extends Activity {
                         : "Warm".equals(item.name) ? "ANALOGUE COLOUR"
                         : "Punch".equals(item.name) ? "TRANSIENT IMPACT"
                         : "Yours".equals(item.name) ? "BUILT FROM YOUR PICKS" : "IMPORTED MASTER";
-                TextView versionDetail = parts.text(detail, Look.label, 10, Look.DIM);
+                if (item.report != null) detail += item.report.passed() ? "  /  CLEAN" : "  /  CHECK";
+                TextView versionDetail = parts.text(detail, Look.label, 10, item.report != null && !item.report.passed() ? Look.AMBER : Look.DIM);
                 versionDetail.setSingleLine(true);
                 versionDetail.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 names.addView(versionDetail);
@@ -820,6 +842,45 @@ public final class MainActivity extends Activity {
             r.setContentDescription(hide ? blindName : item.name + ", " + number(item.lufs) + " LUFS, " + number(item.truePeak)
                     + " dBTP, " + number(item.lra) + " LU" + (on ? ", selected" : ""));
             versionList.addView(r, Parts.line(Parts.WRAP, i == 0 ? 0 : 8));
+        }
+    }
+
+    /** Each take's automatic check, with a jump to any spot still worth a listen. */
+    private void drawCheck(Item item, boolean hide) {
+        checkPanel.setVisibility(hide || item == null ? View.GONE : View.VISIBLE);
+        spotRows.removeAllViews();
+        double total = length();
+        Distortion.Report report = hide || item == null ? null : item.report;
+        int count = report == null ? 0 : report.spots.size();
+        double[] marks = new double[count];
+        boolean[] serious = new boolean[count];
+        for (int i = 0; i < count; i++) {
+            marks[i] = total > 0 ? report.spots.get(i).startSeconds / total : 0;
+            serious[i] = report.spots.get(i).audible;
+        }
+        wave.setMarks(marks, serious);
+        if (item == null) return;
+        if (order.get(selected) == 0) {
+            checkLine.setText(sourceFlatPeaks > 0 ? sourceFlatPeaks + " flat-topped peaks are already in this file. Mastering cannot undo them."
+                    : "No flat-topped peaks found in the source.");
+        } else if (report == null) {
+            checkLine.setText("Only takes made here can be checked, because this needs the audio from before the limiter.");
+        } else if (count == 0) {
+            checkLine.setText(item.verdict + ". Nothing likely to be heard.");
+        } else {
+            checkLine.setText(item.verdict + ". Marked on the waveform. Tap a time to go there.");
+        }
+        LinearLayout r = null;
+        int shown = Math.min(6, count);
+        for (int i = 0; i < shown; i++) {
+            if (i % 3 == 0) { r = parts.row(); spotRows.addView(r, Parts.line(Look.dp(48), i == 0 ? 2 : 6)); }
+            final double at = report.spots.get(i).startSeconds;
+            Button b = parts.button(clock(at), v -> {
+                player.seek(at / Math.max(0.001, length()));
+                wave.setFraction(player.fraction());
+            });
+            Look.type(b, Look.mono, 14, serious[i] ? Look.HOT : Look.AMBER);
+            r.addView(b, Parts.share(Look.dp(48), 1, i % 3 == 0 ? 0 : 6));
         }
     }
 
@@ -851,7 +912,10 @@ public final class MainActivity extends Activity {
         Look.enable(matchButton, !hide);
         if (hide) matchLine.setText("Held on during the blind test. Trims are hidden so they cannot give a version away.");
         else if (!any) matchLine.setText("Evens out playback level only. Your files are never changed.");
-        else if (matched) matchLine.setText(String.format(Locale.US, "Playback trim on %s: %.1f dB. Your files are not changed.", item.name, player.trimDb(order.get(selected))));
+        else if (matched) {
+            double trim = player.trimDb(order.get(selected));
+            matchLine.setText(String.format(Locale.US, "Playback trim on %s: %.1f dB. Your files are not changed.", item.name, Math.abs(trim) < 0.05 ? 0.0 : trim));
+        }
         else matchLine.setText("Off: each version plays at its real level, so louder ones may seem better.");
 
         blindState.setText(blind == BLIND_OFF ? "OFF" : blind == BLIND_ON ? "ON" : "RESULTS");
@@ -878,6 +942,7 @@ public final class MainActivity extends Activity {
         double[] source = targetMid == null || !any ? null : ToneView.againstTarget(items.get(0).mid, targetMid);
         double[] take = targetMid == null || !any || order.get(selected) == 0 || item.mid == null ? null : ToneView.againstTarget(item.mid, targetMid);
         tone.show(source, take, item == null ? "" : item.name, hide);
+        drawCheck(item, hide);
         refreshTake(item);
     }
 
@@ -1032,6 +1097,9 @@ public final class MainActivity extends Activity {
             Look.enable(masterButton, songUri != null);
         }
         progress.setVisibility(working ? View.VISIBLE : View.GONE);
+        boolean takesReady = !order.isEmpty() && !rendering;
+        backToTakes.setVisibility(takesReady ? View.VISIBLE : View.GONE);
+        sessionScreen.setPadding(0, 0, 0, Look.dp(takesReady ? 172 : 116));
         if (working) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
@@ -1125,6 +1193,7 @@ public final class MainActivity extends Activity {
                 float[] sourceBars = WaveView.measure(in, BARS);
                 Engineer.Session session = Engineer.prepare(in, target, asked, bar);
                 final Listen before = session.before;
+                sourceFlatPeaks = session.sourceFlatPeaks;
                 main.post(() -> { setMeta(meta); measuredNow = before; ui(a -> a.showMeasured(before)); });
                 player.add(new AbPlayer.Version("Source", sourceFile, before.loudness.integrated));
                 final List<Item> made = new ArrayList<>();
@@ -1140,7 +1209,10 @@ public final class MainActivity extends Activity {
                     r.master = null;
                     results.add(r);
                     player.add(new AbPlayer.Version(take.label, files[0], r.after.loudness.integrated));
-                    made.add(new Item(take.label, r.after, bars, files));
+                    Item done = new Item(take.label, r.after, bars, files);
+                    done.report = r.distortion;
+                    done.verdict = r.verdict;
+                    made.add(done);
                 }
                 session.release();
                 final String text = Engineer.sheet(session, results) + albumCheck(results)

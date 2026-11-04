@@ -17,6 +17,8 @@ final class Stack implements Oversample.Stage {
 
     private final double gain, kneeStart, kneeWidth, ceiling, shareDb;
     private double fast, slow, transientness, fastFall, slowRise, shapeFall;
+    private final float[] calm;
+    private final int calmStep;
     private final boolean clipOn;
     final Stats stats = new Stats();
     private final int look, rate, statEvery;
@@ -28,7 +30,14 @@ final class Stack implements Oversample.Stage {
     private double env = 1, sustained, coef, sustainCoef;
 
     Stack(int rate, double gainDb, double clipDb, double clipWasDb, double ceilingDb) {
+        this(rate, gainDb, clipDb, clipWasDb, ceilingDb, null);
+    }
+
+    /** @param calm one value per 10 ms: 0 leaves that moment entirely to the limiter */
+    Stack(int rate, double gainDb, double clipDb, double clipWasDb, double ceilingDb, float[] calm) {
         this.rate = rate;
+        this.calm = calm;
+        calmStep = Math.max(1, rate / 100);
         gain = Math.pow(10, gainDb / 20);
         double top = Math.pow(10, clipDb / 20);
         kneeStart = top * Math.pow(10, -1.5 / 20);
@@ -63,12 +72,17 @@ final class Stack implements Oversample.Stage {
         slow += (level - slow) * slowRise;
         double ratio = fast / Math.max(1e-9, slow);
         double t = Math.max(0, Math.min(1, (ratio - 2.0) / 1.2));
+        hold = false;
+        if (calm != null) {
+            int at = (int) (t0 / calmStep);
+            if (at < calm.length && calm[at] == 0) { hold = true; t = 0; }
+        }
         transientness = t > transientness ? t : t + (transientness - t) * shapeFall;
     }
 
     private double clip(double x) {
         double a = Math.abs(x);
-        if (a <= kneeStart) return x;
+        if (a <= kneeStart || hold) return x;
         double lift = Math.pow(10, (1 - transientness) * shareDb / 20);
         double start = kneeStart * lift, width = kneeWidth * lift;
         if (a <= start) return x;
@@ -79,9 +93,13 @@ final class Stack implements Oversample.Stage {
     }
     private double clipPeak = 1; private boolean clippedNow;
 
+    private long t0;
+    private boolean hold;
+
     @Override public void process(double[] l, double[] r, int n) {
         for (int i = 0; i < n; i++) {
             clippedNow = false;
+            t0 = t;
             double x = l[i] * gain, y = r[i] * gain;
             if (clipOn) {
                 follow(Math.max(Math.abs(x), Math.abs(y)));

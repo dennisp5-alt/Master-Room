@@ -19,6 +19,7 @@ makes its decisions once, and leaves the final call to level-matched listening.
 | Transformer, tape, valve | `Tone`: at 4x, at a calibrated 0 VU = -18 dBFS |
 | Check the print | `Eq.missing`: measures what the EQ really did and corrects it, then checks the low end after the chain |
 | Clip, then limit | `Stack`: 4x soft clipper takes sudden peaks only, held notes go to a true-peak limiter |
+| Check before delivery | `Distortion`: compares audio before and after the loudness stage, judges what was added against what the music hides, then eases clipping or level until it is clean |
 | Dither and deliver | `Wav`, `Resample`, `Release`: 24-bit at source rate, 16-bit 44.1 kHz, tagged 320 kbps MP3 |
 | Decide by ear | `AbPlayer`: level-matched, gapless, optional blind test, imports a Stem Lab master |
 

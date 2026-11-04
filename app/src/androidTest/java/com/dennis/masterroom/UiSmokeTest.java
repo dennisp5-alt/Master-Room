@@ -3,6 +3,7 @@ package com.dennis.masterroom;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -237,11 +238,13 @@ public class UiSmokeTest {
         shot("compare_top");
         checkTargets();
         for (String n : new String[]{"Source", "Clean", "Warm", "Punch", "Yours"}) assertNotNull(n, find(n));
+        assertNotNull("Automatic check is shown", find("DISTORTION CHECK"));
         assertNotNull("PICK A TAKE stays disabled on Source", find("PICK A TAKE"));
         assertFalse(find("PICK A TAKE").isEnabled());
 
         tap("Warm");
         assertNotNull(find("SAVE WARM"));
+        assertTrue("Take has a distortion result", hasText("Nothing likely to be heard") || hasText("may be audible"));
         assertTrue("Level match shows a trim", hasText("Playback trim on Warm"));
         tap("TONE");
         shot("compare_tone");
@@ -281,6 +284,7 @@ public class UiSmokeTest {
         for (String n : new String[]{"Source", "Clean", "Warm", "Punch", "Yours", "StemLab_Master"}) assertFalse(n + " leaked in blind test", hasText(n));
         assertFalse("Numbers leaked in blind test", hasText("-14.0"));
         assertFalse(hasText("Playback trim"));
+        assertNull("Distortion results stay hidden in a blind test", find("DISTORTION CHECK"));
         shot("blind_on");
         tap("Version 2");
         tap("Reveal results");
@@ -321,7 +325,8 @@ public class UiSmokeTest {
 
         tap("Back");
         assertNotNull("Session screen", find("MASTER IT"));
-        tap("COMPARE");
+        shot("session_back_to_masters");
+        tap("BACK TO YOUR MASTERS");
         assertNotNull("Selected take kept", find("WARM SAVED"));
 
         tap("Back");
