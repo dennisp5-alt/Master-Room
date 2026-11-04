@@ -232,14 +232,10 @@ public final class MainActivity extends Activity {
         controls.addView(styleTitle);
         styleRow = parts.row();
         controls.addView(styleRow, Parts.line(Look.dp(48), 5));
-        LinearLayout refs = parts.row();
-        referenceLine = parts.text("", Look.body, 12, Look.DIM);
+        referenceLine = parts.text("", Look.body, 11, Look.DIM);
         referenceLine.setSingleLine(true);
         referenceLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        refs.addView(referenceLine, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
-        refs.addView(parts.link("ADD RECORD", v -> pick(PICK_REFERENCE)),
-                new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(40)));
-        controls.addView(refs, Parts.line(Look.dp(40), 0));
+        controls.addView(referenceLine, Parts.line(Parts.WRAP, 4));
         View divider = new View(this);
         divider.setBackgroundColor(Look.HAIR);
         controls.addView(divider, Parts.line(Look.dp(1), 0));
@@ -312,6 +308,10 @@ public final class MainActivity extends Activity {
             String n = s.name().charAt(0) + s.name().substring(1).toLowerCase(Locale.US);
             styleRow.addView(parts.segment(n, s == style, Look.strong, v -> { style = pick; drawStyles(); refreshReferences(); }));
         }
+        Button ref = parts.link("ADD RECORD", v -> pick(PICK_REFERENCE));
+        Look.type(ref, Look.label, 12, Look.AMBER);
+        ref.setLetterSpacing(0.01f);
+        styleRow.addView(ref, new LinearLayout.LayoutParams(Look.dp(81), Look.dp(48)));
     }
 
     private void drawLevels() {
