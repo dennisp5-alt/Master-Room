@@ -262,16 +262,14 @@ public final class MainActivity extends Activity {
         pathTitle.addView(parts.text("06 MODULES", Look.mono, 10, Look.AMBER_DIM));
         pathPanel.addView(pathTitle);
         LinearLayout path = parts.row();
-        final String[] symbols = {"≋", "▥", "◉", "◇", "⌁", "▣"};
         for (int i = 0; i < STAGES.length; i++) {
             LinearLayout module = new LinearLayout(this);
             module.setOrientation(LinearLayout.VERTICAL);
             module.setGravity(Gravity.CENTER);
             module.setBackground(Look.shape(Look.WELL, Look.HAIR, 7));
             module.setPadding(0, Look.dp(4), 0, Look.dp(3));
-            TextView glyph = parts.text(symbols[i], Look.strong, 19, Look.AMBER);
-            glyph.setGravity(Gravity.CENTER);
-            module.addView(glyph, new LinearLayout.LayoutParams(Parts.MATCH, Look.dp(24)));
+            SignalIconView icon = new SignalIconView(this, i);
+            module.addView(icon, new LinearLayout.LayoutParams(Parts.MATCH, Look.dp(24)));
             LinearLayout moduleFoot = parts.row();
             moduleFoot.setGravity(Gravity.CENTER);
             View led = new View(this);
