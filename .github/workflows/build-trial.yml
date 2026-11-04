@@ -3,7 +3,7 @@ name: Master Room trial APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'design/studio-console-premium-v1']
+    branches: [main, 'design/studio-console-premium-v1', 'design/studio-console-v2-compact']
 
 permissions:
   contents: read
