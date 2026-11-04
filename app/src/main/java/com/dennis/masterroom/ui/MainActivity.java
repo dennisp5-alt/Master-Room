@@ -237,7 +237,7 @@ public final class MainActivity extends Activity {
         referenceLine.setSingleLine(true);
         referenceLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
         refs.addView(referenceLine, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
-        refs.addView(parts.link("+ REFERENCE", v -> pick(PICK_REFERENCE)),
+        refs.addView(parts.link("ADD RECORD", v -> pick(PICK_REFERENCE)),
                 new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(40)));
         controls.addView(refs, Parts.line(Look.dp(40), 0));
         View divider = new View(this);
