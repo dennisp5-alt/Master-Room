@@ -3,7 +3,7 @@ name: UI smoke test
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'design/studio-console-premium-v1']
+    branches: [main, 'design/studio-console-premium-v1', 'design/studio-console-v2-compact']
 
 concurrency:
   group: ui-smoke
