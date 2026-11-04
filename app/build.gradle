@@ -1,0 +1,40 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.dennis.masterroom'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.dennis.masterroom.trial'
+        minSdk 29
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0-trial'
+    }
+
+    signingConfigs {
+        // Test key, password public: lets each test APK install over the last one.
+        trial {
+            storeFile rootProject.file('signing/masterroom-test.jks')
+            storePassword 'masterroomtest'
+            keyAlias 'masterroom'
+            keyPassword 'masterroomtest'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.trial
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+}

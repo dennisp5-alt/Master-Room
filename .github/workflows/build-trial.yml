@@ -1,0 +1,37 @@
+name: Master Room trial APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.6'
+      - name: Engine checks
+        run: |
+          mkdir -p build/host
+          javac -nowarn -encoding UTF-8 -d build/host $(find app/src/main/java/com/dennis/masterroom/engine -name '*.java') tools/check/com/dennis/masterroom/engine/EngineChecks.java
+          java -Xmx3g -cp build/host com.dennis.masterroom.engine.EngineChecks
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MasterRoom-trial-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
