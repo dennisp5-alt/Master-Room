@@ -29,6 +29,13 @@ final class Eq {
         double sideDb(double f) {
             return midDb(f) + bell(f, 280, 0.8, sideLowMidDb) + highShelf(f, 9000, sideAirDb);
         }
+        void add(double low, double lowMid, double presence, double air, double limit) {
+            lowDb = clamp(lowDb + low, limit); lowMidDb = clamp(lowMidDb + lowMid, limit);
+            presenceDb = clamp(presenceDb + presence, limit); airDb = clamp(airDb + air, limit);
+        }
+        private static double clamp(double v, double limit) {
+            return Math.round(Math.max(-limit, Math.min(limit, v)) * 10) / 10.0;
+        }
         List<String> describe() {
             List<String> out = new ArrayList<>();
             add(out, "Lows (below 90 Hz)", lowDb);
@@ -88,6 +95,36 @@ final class Eq {
         }
         if (song.lowSideDb > -14) m.monoBelowHz = 100;
         return m;
+    }
+
+    /**
+     * The engineer checking the print. Compares what the master actually did with what was
+     * intended, using 500 Hz to 1 kHz as the fixed point, and returns the four corrections.
+     * @param wanted intended change per band; got and from are measured tone
+     */
+    static double[] missing(double[] wanted, double[] from, double[] got, double top) {
+        double[] gap = new double[31], weight = new double[31];
+        double c = 0;
+        int n = 0;
+        for (int i = 0; i < 31; i++) {
+            double f = Listen.BANDS[i];
+            if (f >= 500 && f <= 1000) { c += got[i] - from[i] - wanted[i]; n++; }
+        }
+        c /= Math.max(1, n);
+        for (int i = 0; i < 31; i++) {
+            double f = Listen.BANDS[i];
+            gap[i] = wanted[i] - (got[i] - from[i] - c);
+            weight[i] = f >= 40 && f <= Math.min(16000, top * 0.85) ? 1 : 0;
+        }
+        double[][] basis = new double[4][31];
+        for (int i = 0; i < 31; i++) {
+            double f = Listen.BANDS[i];
+            basis[0][i] = lowShelf(f, 90, 1);
+            basis[1][i] = bell(f, 280, 0.8, 1);
+            basis[2][i] = bell(f, 3200, 0.8, 1);
+            basis[3][i] = highShelf(f, 9000, 1);
+        }
+        return solve(basis, gap, weight);
     }
 
     private static double shape(double x, double strength, double limit) {

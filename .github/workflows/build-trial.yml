@@ -26,7 +26,7 @@ jobs:
       - name: Engine checks
         run: |
           mkdir -p build/host
-          javac -nowarn -encoding UTF-8 -d build/host $(find app/src/main/java/com/dennis/masterroom/engine -name '*.java') tools/check/com/dennis/masterroom/engine/EngineChecks.java
+          javac -nowarn -encoding UTF-8 -d build/host $(find app/src/main/java/com/dennis/masterroom/engine app/src/main/java/de -name '*.java') tools/check/com/dennis/masterroom/engine/EngineChecks.java
           java -Xmx3g -cp build/host com.dennis.masterroom.engine.EngineChecks
       - name: Fetch fonts
         run: bash tools/fetch_fonts.sh

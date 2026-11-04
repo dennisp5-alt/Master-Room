@@ -4,6 +4,7 @@ import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
 
+import com.dennis.masterroom.engine.Preview;
 import com.dennis.masterroom.engine.Wav;
 
 import java.io.File;
@@ -33,6 +34,7 @@ final class AbPlayer {
     private volatile int active;
     private volatile boolean playing, closed;
     private boolean matched = true;
+    private volatile Preview preview;
     private volatile long position;
     private Thread thread;
     private AudioTrack track;
@@ -59,6 +61,11 @@ final class AbPlayer {
     }
 
     synchronized boolean isMatched() { return matched; }
+
+    /** A listening preview on playback only. */
+    synchronized void setPreview(Preview.Mode mode) {
+        preview = mode == Preview.Mode.FULL || versions.isEmpty() ? null : new Preview(mode, versions.get(0).header.rate);
+    }
 
     /** The playback trim on one version, in dB. */
     synchronized double trimDb(int i) {
@@ -162,6 +169,8 @@ final class AbPlayer {
                     for (int i = 0; i < CHUNK; i++) { out[2 * i] = al[i]; out[2 * i + 1] = ar[i]; }
                 }
                 heard = want;
+                Preview p = preview;
+                if (p != null) p.process(out, CHUNK);
                 track.write(out, 0, CHUNK * 2, AudioTrack.WRITE_BLOCKING);
                 if (position == at) position = at + CHUNK;
                 if (!more) { position = 0; pause(); }

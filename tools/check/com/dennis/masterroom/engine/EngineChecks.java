@@ -102,9 +102,64 @@ public final class EngineChecks {
         for (int i = tail.frames() - rate * 3; i < tail.frames(); i++) { tail.l[i] = 0; tail.r[i] = 0; }
         Engineer.Result tr = Engineer.master(Engineer.prepare(tail, Target.builtIn(Target.Style.POP), (x, y) -> { }), Engineer.Take.CLEAN, -14, (x, y) -> { });
         check("Silence at the end stays clean", finite(tr.master), "no invalid samples");
+        // Repair: real damage is found and rebuilt, clean music is left alone.
+        Audio clean = music(20, rate);
+        Repair.Outcome none = Repair.apply(clean);
+        check("Clean audio gets no repairs", none.clicks + none.dropouts == 0 && none.audio == clean, none.clicks + " clicks");
+        Audio damaged = clean.copy();
+        int[] spots = {rate * 3 + rate / 4, rate * 7 + rate / 3, rate * 11 + rate / 4, rate * 15 + rate / 3};
+        for (int at : spots) { damaged.l[at] += 0.35f; damaged.r[at] -= 0.3f; }
+        Repair.Outcome mended = Repair.apply(damaged);
+        double left = 0;
+        for (int at : spots) left = Math.max(left, Math.abs(mended.audio.l[at] - clean.l[at]));
+        check("Clicks are found and rebuilt", mended.clicks >= spots.length && left < 0.05, String.format(Locale.US, "%d found, worst left %.3f of 0.35", mended.clicks, left));
+        Audio burst = new Audio(rate * 8, rate);
+        Random z = new Random(2);
+        for (int i = 0; i < rate / 40; i++) burst.l[i] = burst.r[i] = (float) (0.2 * z.nextGaussian());
+        for (int i = rate; i < burst.frames(); i++) burst.l[i] = burst.r[i] = (float) (0.2 * Math.sin(2 * Math.PI * 220 * i / rate));
+        check("Stray burst before the song is removed", Repair.apply(burst).startBurst, "");
+
+        // Clipper: a held note must reach the limiter unclipped, a drum hit must not.
+        Audio held = sine(1000, -3, 3, rate, 0);
+        Stack[] hs = new Stack[1];
+        Audio heldOut = Oversample.run4x(held, r -> hs[0] = new Stack(r, 0, -3.5, 2, -6));
+        double third = harmonic(heldOut.l, 1000, rate, 3);
+        check("Clipper leaves a held note alone", hs[0].stats.clippedPercent() < 2 && third < -55, String.format(Locale.US, "clipped %.3f%%, 3rd harmonic %.1f dB", hs[0].stats.clippedPercent(), third));
+        Audio hits = new Audio(rate * 3, rate);
+        for (int i = 0; i < hits.frames(); i++) {
+            double t = (i % (rate / 2)) / (double) rate;
+            hits.l[i] = hits.r[i] = (float) (0.1 * Math.sin(2 * Math.PI * 220 * i / rate) + 0.9 * Math.exp(-t * 200) * Math.sin(2 * Math.PI * 180 * t));
+        }
+        Stack[] ds = new Stack[1];
+        Oversample.run4x(hits, r -> ds[0] = new Stack(r, 0, -3.5, 2, -6));
+        check("Clipper still shaves drum hits", ds[0].stats.clipMaxDb > 1, String.format(Locale.US, "up to %.1f dB", ds[0].stats.clipMaxDb));
+
+        // Previews: playback-only curves do what their names say.
+        check("Phone preview loses deep bass", previewDb(Preview.Mode.PHONE, 60) < previewDb(Preview.Mode.PHONE, 1000) - 20, String.format(Locale.US, "60 Hz %.1f dB, 1 kHz %.1f dB", previewDb(Preview.Mode.PHONE, 60), previewDb(Preview.Mode.PHONE, 1000)));
+        check("Small speaker preview loses sub bass", previewDb(Preview.Mode.SMALL, 40) < previewDb(Preview.Mode.SMALL, 130) - 10, "");
+        check("Full preview changes nothing", Math.abs(previewDb(Preview.Mode.FULL, 1000)) < 0.01, "");
+
+        // Taste: nothing until there is enough to go on, then it leans towards your picks.
+        java.util.List<String> log = new java.util.ArrayList<>();
+        for (int i = 0; i < 7; i++) log.add(Taste.record("COUNTRY", "blind", "Warm"));
+        check("No Yours take from too few picks", Taste.yours(log, "COUNTRY") == null, "");
+        log.add(Taste.record("COUNTRY", "saved", "Punch"));
+        Engineer.Recipe mine = Taste.yours(log, "COUNTRY");
+        check("Yours take leans to what you pick", mine != null && Math.abs(mine.valve - 0.49) < 0.02, mine == null ? "none" : String.format(Locale.US, "valve %.2f", mine.valve));
+
         System.out.println(failed == 0 ? "ALL_ENGINE_CHECKS_PASS" : failed + " CHECK(S) FAILED");
         if (failed != 0) System.exit(1);
     }
+    static double previewDb(Preview.Mode mode, double hz) {
+        int rate = 48000, n = rate;
+        float[] io = new float[n * 2];
+        for (int i = 0; i < n; i++) io[2 * i] = io[2 * i + 1] = (float) (0.1 * Math.sin(2 * Math.PI * hz * i / rate));
+        new Preview(mode, rate).process(io, n);
+        double p = 0;
+        for (int i = n; i < 2 * n; i++) p += io[i] * io[i];
+        return 10 * Math.log10(p / n / 0.005);
+    }
+
     static boolean refused(Audio a) {
         try { Engineer.prepare(a, Target.builtIn(Target.Style.COUNTRY), (x, y) -> { }); return false; }
         catch (IllegalArgumentException e) { return true; }

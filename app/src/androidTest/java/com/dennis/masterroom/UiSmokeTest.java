@@ -175,6 +175,10 @@ public class UiSmokeTest {
         Wav.write(first, song(24, 1, 0.5), 24);
         Wav.write(other, song(24, 2, 0.8), 24);
         answerPicker(first);
+        // Eight remembered picks, so this run also proves the Yours take appears.
+        try (java.io.PrintWriter w = new java.io.PrintWriter(new File(app.getFilesDir(), "taste.txt"))) {
+            for (int i = 0; i < 8; i++) w.println("COUNTRY|blind|" + (i % 2 == 0 ? "Warm" : "Punch"));
+        }
 
         Intent launch = new Intent(app, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         activity = ins.startActivitySync(launch);
@@ -197,13 +201,28 @@ public class UiSmokeTest {
         shot("session_bottom");
         checkTargets();
 
+        tap("START ALBUM");
+        assertTrue(hasText("save a take to set its sound"));
+        scroll(false);
+
         tap("MASTER IT");
         SystemClock.sleep(3000);
+        scroll(true);
         shot("session_rendering");
-        waitFor("the three takes", 14 * 60 * 1000, () -> find("COMPARE") != null && find("LEVEL MATCH") != null);
+        // The render must survive leaving the app and the screen being closed.
+        ins.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME);
+        SystemClock.sleep(3000);
+        Bitmap away = ins.getUiAutomation().takeScreenshot();
+        assertNotNull(away);
+        ins.runOnMainSync(() -> activity.finish());
+        SystemClock.sleep(6000);
+        activity = ins.startActivitySync(new Intent(app, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        ins.waitForIdleSync();
+        shot("back_during_render");
+        waitFor("the takes after coming back", 20 * 60 * 1000, () -> find("LEVEL MATCH") != null);
         shot("compare_top");
         checkTargets();
-        for (String n : new String[]{"Source", "Clean", "Warm", "Punch"}) assertNotNull(n, find(n));
+        for (String n : new String[]{"Source", "Clean", "Warm", "Punch", "Yours"}) assertNotNull(n, find(n));
         assertNotNull("PICK A TAKE stays disabled on Source", find("PICK A TAKE"));
         assertFalse(find("PICK A TAKE").isEnabled());
 
@@ -224,6 +243,12 @@ public class UiSmokeTest {
         assertFalse("Playback moved on after switching version: " + before + " then " + after, after.startsWith("0:00 "));
         tap("Pause");
 
+        tap("Phone");
+        assertTrue(hasText("Rough preview"));
+        shot("compare_preview");
+        tap("Full");
+        assertFalse(hasText("Rough preview"));
+
         tap("Turn level match off");
         assertTrue(hasText("real level"));
         shot("compare_match_off");
@@ -239,7 +264,10 @@ public class UiSmokeTest {
         scroll(true);
         tap("Start blind test");
         assertTrue(hasText("Version 1"));
-        for (String n : new String[]{"Source", "Clean", "Warm", "Punch", "StemLab_Master"}) assertFalse(n + " leaked in blind test", hasText(n));
+        for (String n : new String[]{"Source", "Clean", "Punch", "StemLab_Master"}) assertFalse(n + " leaked in blind test", hasText(n));
+        for (View v : visible()) {
+            if (v instanceof TextView && !hasTasteWords((TextView) v)) assertFalse("Name leaked", ((TextView) v).getText().toString().equals("Warm"));
+        }
         assertFalse("Numbers leaked in blind test", hasText("-14.0"));
         assertFalse(hasText("Playback trim"));
         shot("blind_on");
@@ -251,10 +279,28 @@ public class UiSmokeTest {
 
         tap("Warm");
         scroll(true);
+        tap("Release details");
+        ins.waitForIdleSync();
+        onUi(() -> { for (View v : visible()) if (v instanceof android.widget.EditText) {
+            CharSequence d = v.getContentDescription();
+            if ("ARTIST".contentEquals(d)) ((TextView) v).setText("Test Artist");
+            if ("TITLE".contentEquals(d)) ((TextView) v).setText("Smoke Song");
+            if ("ISRC".contentEquals(d)) ((TextView) v).setText("AU-ABC-26-00001");
+        } return true; });
+        scroll(true);
+        shot("release_details");
         tap("SAVE WARM");
-        waitFor("saved take", 60000, () -> find("WARM SAVED") != null);
+        waitFor("saved take", 180000, () -> find("WARM SAVED") != null);
         shot("take_saved");
         assertEquals(false, find("WARM SAVED").isEnabled());
+        List<String> saved = new ArrayList<>();
+        try (android.database.Cursor c = app.getContentResolver().query(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                new String[]{android.provider.MediaStore.MediaColumns.DISPLAY_NAME, android.provider.MediaStore.MediaColumns.SIZE}, null, null, null)) {
+            while (c != null && c.moveToNext()) if (c.getLong(1) > 0) saved.add(c.getString(0));
+        }
+        for (String f : new String[]{"Smoke Song_Warm_24bit.wav", "Smoke Song_Warm_16bit_44k.wav", "Smoke Song_Warm_320k.mp3", "Smoke Song_Warm_session.txt"}) {
+            assertTrue("Missing " + f + " in " + saved, saved.contains(f));
+        }
 
         tap("Session Sheet");
         ins.waitForIdleSync();
@@ -271,9 +317,17 @@ public class UiSmokeTest {
         answerPicker(other);
         tap("ADD RECORD");
         waitFor("reference record", 120000, () -> hasText("1 reference record"));
+        assertTrue("Album remembers the saved take", hasText("1 song"));
         shot("session_reference");
+        tap("MANAGE");
+        shot("reference_shelf");
+        tap("REMOVE");
+        assertFalse(hasText("1 reference record"));
+        tap("END ALBUM");
         activity.finish();
     }
+
+    private boolean hasTasteWords(TextView t) { return t.getText().toString().contains("takes so far"); }
 
     private View firstWithText(String part) {
         for (View v : visible()) if (v instanceof TextView && ((TextView) v).getText().toString().contains(part)) return v;

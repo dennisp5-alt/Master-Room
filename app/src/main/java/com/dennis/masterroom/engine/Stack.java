@@ -15,7 +15,8 @@ final class Stack implements Oversample.Stage {
         double clippedPercent() { return frames == 0 ? 0 : 100.0 * clipped / frames; }
     }
 
-    private final double gain, kneeStart, kneeWidth, ceiling;
+    private final double gain, kneeStart, kneeWidth, ceiling, shareDb;
+    private double fast, slow, transientness, fastFall, slowRise, shapeFall;
     private final boolean clipOn;
     final Stats stats = new Stats();
     private final int look, rate, statEvery;
@@ -33,6 +34,10 @@ final class Stack implements Oversample.Stage {
         kneeStart = top * Math.pow(10, -1.5 / 20);
         kneeWidth = top - kneeStart;
         clipOn = clipWasDb > 0.01;
+        shareDb = clipWasDb;
+        fastFall = Math.exp(-1 / (0.002 * rate));
+        slowRise = 1 - Math.exp(-1 / (0.06 * rate));
+        shapeFall = Math.exp(-1 / (0.006 * rate));
         ceiling = Math.pow(10, ceilingDb / 20);
         int n = (int) Math.round(0.005 * rate);
         look = Math.max(4, n - n % 4);
@@ -48,11 +53,27 @@ final class Stack implements Oversample.Stage {
 
     @Override public int latency() { return look; }
 
+    /**
+     * Follows how sudden the sound is. A drum hit stands well above the last 60 ms; a held
+     * vocal or guitar note does not. Only sudden peaks are clipped. Everything else goes
+     * to the limiter, which turns it down instead of changing its shape.
+     */
+    private void follow(double level) {
+        fast = level > fast ? level : level + (fast - level) * fastFall;
+        slow += (level - slow) * slowRise;
+        double ratio = fast / Math.max(1e-9, slow);
+        double t = Math.max(0, Math.min(1, (ratio - 2.0) / 1.2));
+        transientness = t > transientness ? t : t + (transientness - t) * shapeFall;
+    }
+
     private double clip(double x) {
         double a = Math.abs(x);
         if (a <= kneeStart) return x;
-        double u = (a - kneeStart) / kneeWidth;
-        double s = kneeStart + kneeWidth * Tone.tanh(u);
+        double lift = Math.pow(10, (1 - transientness) * shareDb / 20);
+        double start = kneeStart * lift, width = kneeWidth * lift;
+        if (a <= start) return x;
+        double u = (a - start) / width;
+        double s = start + width * Tone.tanh(u);
         if (s < a) { double d = a / s; if (d > clipPeak) clipPeak = d; clippedNow = true; }
         return x < 0 ? -s : s;
     }
@@ -62,7 +83,10 @@ final class Stack implements Oversample.Stage {
         for (int i = 0; i < n; i++) {
             clippedNow = false;
             double x = l[i] * gain, y = r[i] * gain;
-            if (clipOn) { x = clip(x); y = clip(y); }
+            if (clipOn) {
+                follow(Math.max(Math.abs(x), Math.abs(y)));
+                x = clip(x); y = clip(y);
+            }
             double p = Math.max(Math.abs(x), Math.abs(y));
             double req = p > ceiling ? ceiling / p : 1;
             // Sliding minimum.

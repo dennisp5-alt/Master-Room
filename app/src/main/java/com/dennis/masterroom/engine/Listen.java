@@ -42,6 +42,14 @@ public final class Listen {
         return out;
     }
 
+    /** Just the tone and loudness of a work in progress, for the engine's own checks. */
+    static Listen tone(Audio a) {
+        Listen out = new Listen();
+        out.loudness = Loudness.measure(a);
+        spectrum(a, out);
+        return out;
+    }
+
     /** A reference record that has already been measured; the audio itself is not kept. */
     public static Listen fromBands(double[] midDb, double[] sideDb) {
         Listen out = new Listen();

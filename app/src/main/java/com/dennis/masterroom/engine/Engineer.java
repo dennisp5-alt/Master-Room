@@ -15,11 +15,34 @@ public final class Engineer {
         WARM("Warm", "Transformer, tape and valve path, medium compression", 0.8, 0.5, 0.35, 0.5, 30, 1.0, 2.0, 0.6),
         PUNCH("Punch", "Slower attack lets drums through, more of the peaks go to the clipper", 1.0, 0.35, 0.2, 0.2, 45, 0.7, 2.5, 0.7);
         public final String label, about;
-        final double compressDb, valve, iron, tape, attackMs, rides, maxClipDb, clipPortion;
+        private final double compressDb, valve, iron, tape, attackMs, rides, maxClipDb, clipPortion;
+        public Recipe recipe() { return new Recipe(label, about, compressDb, valve, iron, tape, attackMs, rides, maxClipDb, clipPortion); }
         Take(String label, String about, double compressDb, double valve, double iron, double tape, double attackMs, double rides, double maxClipDb, double clipPortion) {
             this.label = label; this.about = about; this.compressDb = compressDb; this.valve = valve; this.iron = iron;
             this.tape = tape; this.attackMs = attackMs; this.rides = rides; this.maxClipDb = maxClipDb; this.clipPortion = clipPortion;
         }
+    }
+
+    /** The settings behind one take. */
+    public static final class Recipe {
+        public final String label, about;
+        final double compressDb, valve, iron, tape, attackMs, rides, maxClipDb, clipPortion;
+        Recipe(String label, String about, double compressDb, double valve, double iron, double tape, double attackMs, double rides, double maxClipDb, double clipPortion) {
+            this.label = label; this.about = about; this.compressDb = compressDb; this.valve = valve; this.iron = iron; this.tape = tape;
+            this.attackMs = attackMs; this.rides = rides; this.maxClipDb = maxClipDb; this.clipPortion = clipPortion;
+        }
+    }
+
+    /** A take made from the settings you keep choosing, in proportion to how often. */
+    public static Recipe blend(String label, double clean, double warm, double punch) {
+        double t = Math.max(1e-9, clean + warm + punch);
+        Recipe a = Take.CLEAN.recipe(), b = Take.WARM.recipe(), c = Take.PUNCH.recipe();
+        double x = clean / t, y = warm / t, z = punch / t;
+        return new Recipe(label, "Built from the takes you pick most",
+                x * a.compressDb + y * b.compressDb + z * c.compressDb, x * a.valve + y * b.valve + z * c.valve,
+                x * a.iron + y * b.iron + z * c.iron, x * a.tape + y * b.tape + z * c.tape,
+                x * a.attackMs + y * b.attackMs + z * c.attackMs, x * a.rides + y * b.rides + z * c.rides,
+                x * a.maxClipDb + y * b.maxClipDb + z * c.maxClipDb, x * a.clipPortion + y * b.clipPortion + z * c.clipPortion);
     }
 
     public interface Progress { void at(String step, int percent); }
@@ -40,12 +63,13 @@ public final class Engineer {
         Eq.Moves moves;
         public final List<String> notes = new ArrayList<>();
         Audio prepared;
+        Listen preparedTone;
         /** Frees the working copy once every take is rendered. */
         public void release() { prepared = null; }
     }
 
     public static final class Result {
-        public Take take;
+        public Recipe take;
         public Audio master;
         public Listen after;
         public double askedLufs, ceilingDb;
@@ -61,6 +85,11 @@ public final class Engineer {
 
     /** Everything every take shares: listening, tone and problem-solving. */
     public static Session prepare(Audio in, Target target, Progress p) {
+        return prepare(in, target, -14, p);
+    }
+
+    /** @param askedLufs sets how hard kick and bass peaks are held: only loud masters need it */
+    public static Session prepare(Audio in, Target target, double askedLufs, Progress p) {
         if (in.seconds() < 5) throw new IllegalArgumentException("That file is too short to master");
         Session s = new Session();
         s.target = target;
@@ -75,7 +104,43 @@ public final class Engineer {
         s.notes.add(moves.isEmpty() ? "Tone already close to target: no EQ" : "EQ: " + String.join(", ", moves));
         if (s.before.cutoffHz < 19000) s.notes.add(String.format(Locale.US, "Source stops near %.1f kHz, so nothing above that was boosted", s.before.cutoffHz / 1000));
 
+        p.at("Checking for clicks and damage", 4);
+        Repair.Outcome fixed = Repair.apply(in);
+        if (fixed.clicks + fixed.dropouts > 0 || fixed.startBurst) {
+            s.notes.add(String.format(Locale.US, "Repairs: %d click%s, %d dropout%s%s", fixed.clicks, fixed.clicks == 1 ? "" : "s",
+                    fixed.dropouts, fixed.dropouts == 1 ? "" : "s", fixed.startBurst ? ", burst removed before the song" : ""));
+        } else {
+            s.notes.add("Repairs: no clicks or dropouts found");
+        }
+
+        double limit = (target.measured ? 3.0 : 2.0) + 1.0;
+        double[] wanted = intended(m);
         p.at("Linear-phase EQ, mid and side", 8);
+        final double lowCut = askedLufs <= -13.5 ? 0.8 : askedLufs <= -11.5 ? 1.5 : 2.5;
+        Audio out = shape(fixed.audio, m, lowCut, s.notes, p);
+        Listen check = Listen.tone(out);
+        for (int pass = 0; pass < 1; pass++) {
+            double[] miss = Eq.missing(wanted, s.before.midDb, check.midDb, s.before.cutoffHz);
+            if (Math.abs(miss[0]) < 0.3 && Math.abs(miss[1]) < 0.3 && Math.abs(miss[2]) < 0.3 && Math.abs(miss[3]) < 0.3) break;
+            m.add(miss[0], miss[1], miss[2], miss[3], limit);
+            p.at("Linear-phase EQ, checking the result", 11);
+            out = shape(fixed.audio, m, lowCut, null, p);
+            check = Listen.tone(out);
+        }
+        s.notes.add("Applied after checking the result: " + String.join(", ", m.describe()));
+        s.prepared = out;
+        s.preparedTone = check;
+        return s;
+    }
+
+    private static double[] intended(Eq.Moves m) {
+        double[] wanted = new double[31];
+        for (int i = 0; i < 31; i++) wanted[i] = m.midDb(Listen.BANDS[i]);
+        return wanted;
+    }
+
+    /** EQ and the corrective dynamics, from the repaired audio. */
+    private static Audio shape(Audio in, Eq.Moves m, double lowCut, List<String> notes, Progress p) {
         float[] mid = new float[in.frames()], side = new float[in.frames()];
         for (int i = 0; i < mid.length; i++) { mid[i] = (in.l[i] + in.r[i]) * 0.5f; side[i] = (in.l[i] - in.r[i]) * 0.5f; }
         final double subsonic = 22, mono = m.monoBelowHz;
@@ -88,13 +153,12 @@ public final class Engineer {
         p.at("Taming harsh and boomy moments", 14);
         DynamicBand.Outcome harsh = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Harshness", 2500, 6000, 2.5, 0.6, 3.0, -22, true));
         DynamicBand.Outcome sib = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Sibilance", 6000, 11000, 4.0, 0.6, 4.0, -26, true));
-        DynamicBand.Outcome low = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Low end", 0, 130, 3.0, 0.5, 2.5, -14, false));
-        s.notes.add(String.format(Locale.US, "Harshness: up to %.1f dB on %.1f%% of the song. Sibilance: up to %.1f dB on %.1f%%. Kick and bass peaks: up to %.1f dB on %.1f%%",
+        DynamicBand.Outcome low = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Low end", 0, 130, 3.0, 0.5, lowCut, -14, false));
+        if (notes != null) notes.add(String.format(Locale.US, "Harshness: up to %.1f dB on %.1f%% of the song. Sibilance: up to %.1f dB on %.1f%%. Kick and bass peaks: up to %.1f dB on %.1f%%",
                 harsh.maxCutDb, harsh.activePercent, sib.maxCutDb, sib.activePercent, low.maxCutDb, low.activePercent));
         Audio out = new Audio(in.frames(), in.rate);
         for (int i = 0; i < mid.length; i++) { out.l[i] = mid[i] + side[i]; out.r[i] = mid[i] - side[i]; }
-        s.prepared = out;
-        return s;
+        return out;
     }
 
     private static double high(double hz, double fc) {
@@ -104,6 +168,10 @@ public final class Engineer {
     }
 
     public static Result master(Session s, Take take, double askedLufs, Progress p) {
+        return master(s, take.recipe(), askedLufs, p);
+    }
+
+    public static Result master(Session s, final Recipe take, double askedLufs, Progress p) {
         long t0 = System.nanoTime();
         Result r = new Result();
         r.take = take; r.askedLufs = askedLufs;
@@ -138,10 +206,27 @@ public final class Engineer {
         }
 
         p.at(take.label + ": finding the level", 60);
-        final Audio pre = a;
+        Audio pre = a;
         double robust = robustPeak(pre);
-        final Loudness.Result preLoud = Loudness.measure(pre);
+        Loudness.Result preLoud = Loudness.measure(pre);
         double gain = search(pre, preLoud, askedLufs, r.ceilingDb, robust, take);
+        // The compressor, colour and clipper can all take low end away. Check, then put back.
+        p.at(take.label + ": checking the low end", 66);
+        Listen quick = Listen.tone(render(pre, preLoud, gain, robust, r.ceilingDb, take, false).audio);
+        double[] noChange = new double[31];
+        double[] miss = Eq.missing(noChange, s.preparedTone.midDb, quick.midDb, s.before.cutoffHz);
+        double lowFix = Math.max(-1.2, Math.min(1.2, miss[0])), midFix = Math.max(-1.0, Math.min(1.0, miss[1]));
+        if (Math.abs(lowFix) >= 0.3 || Math.abs(midFix) >= 0.3) {
+            Eq.Moves fix = new Eq.Moves();
+            fix.lowDb = lowFix; fix.lowMidDb = midFix;
+            FirFilter.Curve curve = hz -> Math.pow(10, fix.midDb(hz) / 20);
+            FirFilter f = new FirFilter(curve, 16384, pre.rate);
+            pre = new Audio(f.apply(pre.l), f.apply(pre.r), pre.rate);
+            r.notes.add(String.format(Locale.US, "Low end put back after the chain: %+.1f dB lows, %+.1f dB low mids", lowFix, midFix));
+            preLoud = Loudness.measure(pre);
+            robust = robustPeak(pre);
+            gain = search(pre, preLoud, askedLufs, r.ceilingDb, robust, take);
+        }
         double usedCeiling = r.ceilingDb - 0.05;
         Rendered best = null;
         double lastGain = 0, lastGot = 0;
@@ -159,6 +244,7 @@ public final class Engineer {
             gain += Math.max(-2, Math.min(2, err / slope));
         }
         Audio master = best.audio;
+        Repair.edges(master);
         double over = Oversample.truePeakDb(master) - r.ceilingDb;
         if (over > 0) master = master.gained(-over - 0.005);
         Stack.Stats st = best.stats;
@@ -217,7 +303,7 @@ public final class Engineer {
         return Listen.db(Control.percentile(peaks, n, 0.995));
     }
 
-    private static Stack stack(int rate, double gainDb, double robustDb, double ceilingDb, Take take) {
+    private static Stack stack(int rate, double gainDb, double robustDb, double ceilingDb, Recipe take) {
         double peak = robustDb + gainDb;
         double excess = Math.max(0, peak - ceilingDb);
         double clipShare = Math.min(take.maxClipDb, take.clipPortion * excess);
@@ -226,7 +312,7 @@ public final class Engineer {
 
     private static final class Rendered { Audio audio; Stack.Stats stats; double lufs; }
 
-    private static Rendered render(Audio pre, Loudness.Result preLoud, double gain, double robust, double ceiling, Take take, boolean full) {
+    private static Rendered render(Audio pre, Loudness.Result preLoud, double gain, double robust, double ceiling, Recipe take, boolean full) {
         Stack[] holder = new Stack[1];
         Oversample.Factory f = rate -> holder[0] = stack(rate, gain, robust, ceiling, take);
         Audio out = full ? Oversample.run4x(pre, f) : Oversample.run1x(pre, f);
@@ -237,7 +323,7 @@ public final class Engineer {
     }
 
     /** Quick 1x renders to find the gain; the real 4x render then only needs a nudge. */
-    private static double search(Audio pre, Loudness.Result preLoud, double asked, double ceiling, double robust, Take take) {
+    private static double search(Audio pre, Loudness.Result preLoud, double asked, double ceiling, double robust, Recipe take) {
         double gain = asked - preLoud.integrated, last = 0, lastGot = 0;
         for (int i = 0; i < 6; i++) {
             double got = render(pre, preLoud, gain, robust, ceiling, take, false).lufs;

@@ -2,11 +2,15 @@ package com.dennis.masterroom.ui;
 
 import android.app.Activity;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,6 +21,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -30,7 +35,10 @@ import com.dennis.masterroom.R;
 import com.dennis.masterroom.engine.Audio;
 import com.dennis.masterroom.engine.Engineer;
 import com.dennis.masterroom.engine.Listen;
+import com.dennis.masterroom.engine.Preview;
+import com.dennis.masterroom.engine.Release;
 import com.dennis.masterroom.engine.Target;
+import com.dennis.masterroom.engine.Taste;
 import com.dennis.masterroom.engine.Wav;
 
 import java.io.BufferedReader;
@@ -48,6 +56,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 /** Session screen: load, choose, master. Compare screen: listen, decide, save. */
 public final class MainActivity extends Activity {
@@ -58,17 +67,22 @@ public final class MainActivity extends Activity {
 
     /** One version in the comparison. Numbers are always measured, never estimated. */
     private static final class Item {
-        final String name; final double lufs, lra, truePeak; final double[] mid; final float[] bars; final File[] files;
+        final String name; final double lufs, lra, truePeak; final double[] mid, side; final float[] bars; final File[] files;
         boolean saved;
         Item(String name, Listen l, float[] bars, File[] files) {
             this.name = name; lufs = l.loudness.integrated; lra = l.loudness.lra; truePeak = l.truePeakDb;
-            mid = l.midDb; this.bars = bars; this.files = files;
+            mid = l.midDb; side = l.sideDb; this.bars = bars; this.files = files;
         }
     }
 
-    private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final Handler main = new Handler(Looper.getMainLooper());
-    private final AbPlayer player = new AbPlayer();
+    // The session lives here rather than in the screen, so a render, a selection and
+    // playback carry on if Android closes the screen while you are in another app.
+    private static final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private static final Handler main = new Handler(Looper.getMainLooper());
+    private static final AbPlayer player = new AbPlayer();
+    private static MainActivity current;
+    private static Context app;
+
     private Parts parts;
 
     private ScrollView sessionScreen, compareScreen;
@@ -83,23 +97,37 @@ public final class MainActivity extends Activity {
     private WaveView wave;
     private ToneView tone;
     private final View[] leds = new View[STAGES.length];
-    private final boolean[] stageDone = new boolean[STAGES.length];
 
-    private Target.Style style = Target.Style.COUNTRY;
-    private double level = -14;
-    private Uri songUri;
-    private String song = "song";
-    private final List<Item> items = new ArrayList<>();
-    private final List<Integer> order = new ArrayList<>();
-    private int selected, blind = BLIND_OFF, pickedShown = -1;
-    private boolean matchBeforeBlind = true, saving, working, importing;
-    private double[] targetMid;
-    private File sessionDir;
-    private String sheet = "";
-    private volatile int measureToken;
+    private TextView albumLine, tasteLine, previewNote;
+    private Button albumButton, manageButton;
+    private LinearLayout shelfList, previewRow, releasePanel;
+    private ImageView releaseChevron;
+    private EditText titleField, artistField, albumField, yearField, trackField, isrcField;
+
+    private static final boolean[] stageDone = new boolean[STAGES.length];
+    private static Target.Style style = Target.Style.COUNTRY;
+    private static double level = -14;
+    private static Uri songUri;
+    private static String song = "song", metaNow = "", statusNow = "", sheet = "";
+    private static Listen measuredNow;
+    private static final List<Item> items = new ArrayList<>();
+    private static final List<Integer> order = new ArrayList<>();
+    private static int selected, blind = BLIND_OFF, pickedShown = -1, runningStage = -1, progressNow;
+    private static boolean matchBeforeBlind = true, saving, working, importing, openCompareNext;
+    private static double[] targetMid;
+    private static File sessionDir;
+    private static Preview.Mode previewMode = Preview.Mode.FULL;
+    private static volatile int measureToken;
+
+    /** Runs on the screen that is showing now, if there is one. */
+    private static void ui(Consumer<MainActivity> job) {
+        main.post(() -> { if (current != null) job.accept(current); });
+    }
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        app = getApplicationContext();
+        current = this;
         Look.load(this);
         parts = new Parts(this);
         FrameLayout root = new FrameLayout(this);
@@ -118,16 +146,42 @@ public final class MainActivity extends Activity {
         masterButton.setElevation(Look.dp(8));
         root.addView(masterButton, action);
         setContentView(root);
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 9);
+        }
         refreshReferences();
+        refreshAlbum();
         refreshCeiling();
-        lightPath(-1);
-        refreshCompare();
+        restore();
         main.postDelayed(this::tick, 100);
     }
 
+    /** Puts the screen back to wherever the session has got to. */
+    private void restore() {
+        if (songUri != null) {
+            songName.setText(song);
+            songMeta.setText(metaNow);
+            songAction.setText("Change");
+        }
+        if (measuredNow != null) showMeasured(measuredNow);
+        meter.setTarget(level);
+        applyBusy();
+        progress.setProgress(progressNow);
+        statusLine.setText(statusNow);
+        lightPath(runningStage);
+        sheetText.setText(sheet);
+        if (!items.isEmpty() && !order.isEmpty()) {
+            wave.setFraction(player.fraction());
+            compareLink.setVisibility(View.VISIBLE);
+        }
+        drawPreview();
+        refreshCompare();
+        if (openCompareNext && !order.isEmpty()) { openCompareNext = false; showCompare(true); }
+    }
+
     @Override protected void onDestroy() {
-        player.close();
-        worker.shutdownNow();
+        if (current == this) current = null;
+        if (isFinishing() && !working) player.pause();
         super.onDestroy();
     }
 
@@ -247,7 +301,16 @@ public final class MainActivity extends Activity {
         referenceLine = parts.text("", Look.body, 11, Look.DIM);
         referenceLine.setSingleLine(true);
         referenceLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        controls.addView(referenceLine, Parts.line(Parts.WRAP, 4));
+        LinearLayout refRow = parts.row();
+        refRow.addView(referenceLine, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        manageButton = parts.link("MANAGE", v -> toggleShelf());
+        Look.type(manageButton, Look.label, 12, Look.AMBER);
+        refRow.addView(manageButton, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
+        controls.addView(refRow, Parts.line(Parts.WRAP, 2));
+        shelfList = new LinearLayout(this);
+        shelfList.setOrientation(LinearLayout.VERTICAL);
+        shelfList.setVisibility(View.GONE);
+        controls.addView(shelfList, Parts.line(Parts.WRAP, 0));
         View divider = new View(this);
         divider.setBackgroundColor(Look.HAIR);
         controls.addView(divider, Parts.line(Look.dp(1), 0));
@@ -263,6 +326,20 @@ public final class MainActivity extends Activity {
         ceilingLine.setSingleLine(true);
         ceilingLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
         controls.addView(ceilingLine, Parts.line(Parts.WRAP, 7));
+        View albumRule = new View(this);
+        albumRule.setBackgroundColor(Look.HAIR);
+        controls.addView(albumRule, Parts.line(Look.dp(1), 7));
+        LinearLayout albumRow = parts.row();
+        LinearLayout albumText = new LinearLayout(this);
+        albumText.setOrientation(LinearLayout.VERTICAL);
+        albumText.addView(parts.label("ALBUM MATCH"));
+        albumLine = parts.text("", Look.body, 11, Look.DIM);
+        albumText.addView(albumLine);
+        albumRow.addView(albumText, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        albumButton = parts.link("", v -> toggleAlbum());
+        Look.type(albumButton, Look.label, 13, Look.AMBER);
+        albumRow.addView(albumButton, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
+        controls.addView(albumRow, Parts.line(Parts.WRAP, 2));
         drawStyles();
         drawLevels();
 
@@ -353,18 +430,20 @@ public final class MainActivity extends Activity {
     private void measureSource(Uri uri) {
         final int token = ++measureToken;
         clearMeasured();
+        measuredNow = null;
         Thread t = new Thread(() -> {
             try {
-                Audio a = Decoder.open(this, uri);
+                Audio a = Decoder.open(app, uri);
                 final String meta = trackMeta(a);
                 Listen l = Listen.to(a);
                 main.post(() -> {
                     if (token != measureToken) return;
-                    songMeta.setText(meta);
-                    showMeasured(l);
+                    setMeta(meta);
+                    measuredNow = l;
+                    ui(x -> x.showMeasured(l));
                 });
             } catch (Throwable e) {
-                main.post(() -> { if (token == measureToken) songMeta.setText("Could not measure this file"); });
+                main.post(() -> { if (token == measureToken) setMeta("Could not measure this file"); });
             }
         }, "measure");
         t.setPriority(Thread.MIN_PRIORITY);
@@ -383,16 +462,14 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void markStage(String step) {
-        if (step.contains("riding")) for (int i = 2; i < stageDone.length; i++) stageDone[i] = false;
-        int stage = stageOf(step);
-        stageDone[stage] = true;
-        if (stage == 5) stageDone[4] = true;
-        lightPath(stage);
+    private static void setMeta(String text) {
+        metaNow = text;
+        ui(a -> a.songMeta.setText(text));
     }
 
     private void resetPath(boolean done) {
         java.util.Arrays.fill(stageDone, done);
+        runningStage = -1;
         lightPath(-1);
     }
 
@@ -401,7 +478,7 @@ public final class MainActivity extends Activity {
         if (step.contains("harsh")) return 1;
         if (step.contains("riding") || step.contains("bus compressor")) return 2;
         if (step.contains("colour")) return 3;
-        if (step.contains("level")) return 4;
+        if (step.contains("level") || step.contains("low end")) return 4;
         if (step.contains("clipper") || step.contains("checking")) return 5;
         return 0;
     }
@@ -493,6 +570,12 @@ public final class MainActivity extends Activity {
         match.addView(matchLine, Parts.line(Parts.WRAP, 6));
         matchButton = parts.button("", v -> toggleMatch());
         match.addView(matchButton, Parts.line(Look.dp(48), 8));
+        match.addView(parts.label("LISTEN ON"), Parts.line(Parts.WRAP, 12));
+        previewRow = parts.row();
+        match.addView(previewRow, Parts.line(Look.dp(48), 6));
+        previewNote = parts.text("Rough preview of a typical device, not a measurement. Your files are not changed.", Look.body, 12, Look.DIM);
+        previewNote.setVisibility(View.GONE);
+        match.addView(previewNote, Parts.line(Parts.WRAP, 6));
 
         LinearLayout columns = parts.row();
         columns.setPadding(Look.dp(12), 0, Look.dp(12), 0);
@@ -525,6 +608,34 @@ public final class MainActivity extends Activity {
         blindPanel.addView(blindLine, Parts.line(Parts.WRAP, 6));
         blindButton = parts.button("", v -> blindStep());
         blindPanel.addView(blindButton, Parts.line(Look.dp(48), 8));
+        tasteLine = parts.text("", Look.body, 12, Look.DIM);
+        blindPanel.addView(tasteLine, Parts.line(Parts.WRAP, 8));
+
+        LinearLayout releaseCard = parts.row();
+        releaseCard.setPadding(Look.dp(14), 0, Look.dp(8), 0);
+        releaseCard.setMinimumHeight(Look.dp(52));
+        Look.surface(releaseCard, Look.metal(8));
+        releaseCard.setClickable(true);
+        releaseCard.setContentDescription("Release details");
+        releaseCard.setOnClickListener(v -> toggleRelease());
+        releaseCard.addView(parts.text("Release details", Look.strong, 16, Look.TEXT), new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        releaseChevron = new ImageView(this);
+        releaseChevron.setImageResource(R.drawable.ic_chevron);
+        releaseCard.addView(releaseChevron, new LinearLayout.LayoutParams(Look.dp(36), Look.dp(36)));
+        column.addView(releaseCard, Parts.line(Parts.WRAP, 10));
+        releasePanel = new LinearLayout(this);
+        releasePanel.setOrientation(LinearLayout.VERTICAL);
+        releasePanel.setPadding(Look.dp(12), Look.dp(4), Look.dp(12), Look.dp(12));
+        releasePanel.setBackground(Look.metal(8));
+        releasePanel.setVisibility(View.GONE);
+        SharedPreferences prefs = getSharedPreferences("release", MODE_PRIVATE);
+        titleField = parts.field(releasePanel, "TITLE", song, 8);
+        artistField = parts.field(releasePanel, "ARTIST", prefs.getString("artist", ""), 8);
+        albumField = parts.field(releasePanel, "ALBUM", prefs.getString("album", ""), 8);
+        yearField = parts.field(releasePanel, "YEAR", prefs.getString("year", ""), 8);
+        trackField = parts.field(releasePanel, "TRACK NUMBER", "", 8);
+        isrcField = parts.field(releasePanel, "ISRC", "", 8);
+        column.addView(releasePanel, Parts.line(Parts.WRAP, 6));
 
         takeButton = parts.gold("PICK A TAKE", v -> saveSelected());
         column.addView(takeButton, Parts.line(Look.dp(60), 14));
@@ -560,6 +671,28 @@ public final class MainActivity extends Activity {
         sheetChevron.setRotation(open ? 180 : 0);
     }
 
+    private void toggleRelease() {
+        boolean open = releasePanel.getVisibility() != View.VISIBLE;
+        releasePanel.setVisibility(open ? View.VISIBLE : View.GONE);
+        releaseChevron.setRotation(open ? 180 : 0);
+    }
+
+    private void drawPreview() {
+        previewRow.removeAllViews();
+        for (Preview.Mode m : Preview.Mode.values()) {
+            final Preview.Mode pick = m;
+            Button b = parts.segment(m.label, m == previewMode, Look.strong, v -> {
+                previewMode = pick;
+                player.setPreview(pick);
+                drawPreview();
+            });
+            Look.type(b, Look.strong, 14, m == previewMode ? Look.BG : Look.TEXT);
+            b.setPadding(0, 0, 0, 0);
+            previewRow.addView(b);
+        }
+        previewNote.setVisibility(previewMode == Preview.Mode.FULL ? View.GONE : View.VISIBLE);
+    }
+
     private void showTone(boolean on) {
         wave.setVisibility(on ? View.GONE : View.VISIBLE);
         tone.setVisibility(on ? View.VISIBLE : View.GONE);
@@ -593,6 +726,7 @@ public final class MainActivity extends Activity {
         } else if (blind == BLIND_ON) {
             pickedShown = selected;
             blind = BLIND_RESULTS;
+            remember("blind", items.get(order.get(selected)).name);
         } else {
             int keep = order.get(selected);
             Collections.sort(order);
@@ -637,7 +771,8 @@ public final class MainActivity extends Activity {
                 String detail = order.get(i) == 0 ? "ORIGINAL AUDIO"
                         : "Clean".equals(item.name) ? "TRANSPARENT / NEUTRAL"
                         : "Warm".equals(item.name) ? "ANALOGUE COLOUR"
-                        : "Punch".equals(item.name) ? "TRANSIENT IMPACT" : "IMPORTED MASTER";
+                        : "Punch".equals(item.name) ? "TRANSIENT IMPACT"
+                        : "Yours".equals(item.name) ? "BUILT FROM YOUR PICKS" : "IMPORTED MASTER";
                 TextView versionDetail = parts.text(detail, Look.label, 10, Look.DIM);
                 versionDetail.setSingleLine(true);
                 versionDetail.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -701,6 +836,7 @@ public final class MainActivity extends Activity {
                     ? String.format(Locale.US, "Your pick, Version %d, was %s.", pickedShown + 1, items.get(order.get(pickedShown)).name) : "");
             blindButton.setText("End blind test");
         }
+        tasteLine.setText(Taste.summary(tasteLog()));
         Look.enable(blindButton, any && !importing);
         Look.enable(importButton, any && !hide && !working && !importing);
         Look.enable(playButton, any);
@@ -751,6 +887,7 @@ public final class MainActivity extends Activity {
     }
 
     private void tick() {
+        if (current != this) return;
         if (compareScreen.getVisibility() == View.VISIBLE && player.size() > 0) {
             double f = player.fraction(), total = length();
             if (player.isPlaying()) wave.setFraction(f);
@@ -784,7 +921,8 @@ public final class MainActivity extends Activity {
         if (code == PICK_SONG) {
             songUri = uri; song = nameOf(uri);
             songName.setText(song);
-            songMeta.setText("Measuring");
+            titleField.setText(song);
+            setMeta("Measuring");
             songAction.setText("Change");
             Look.enable(masterButton, true);
             resetPath(false);
@@ -810,24 +948,38 @@ public final class MainActivity extends Activity {
         return dot > 0 ? last.substring(0, dot) : last;
     }
 
-    private void status(String s) { main.post(() -> statusLine.setText(s)); }
+    private static void status(String s) {
+        statusNow = s;
+        ui(a -> a.statusLine.setText(s));
+    }
 
-    private void fail(Throwable e) {
+    private static void fail(Throwable e) {
         String why = e instanceof OutOfMemoryError ? "The phone ran out of memory for this song" : String.valueOf(e.getMessage());
         main.post(() -> {
-            busy(false);
-            resetPath(false);
-            statusLine.setText(why);
-            if (compareScreen.getVisibility() == View.VISIBLE) Toast.makeText(this, why, Toast.LENGTH_LONG).show();
+            working = false;
+            statusNow = why;
+            java.util.Arrays.fill(stageDone, false);
+            runningStage = -1;
+            ui(a -> {
+                a.applyBusy();
+                a.lightPath(-1);
+                a.statusLine.setText(why);
+                if (a.compareScreen.getVisibility() == View.VISIBLE) Toast.makeText(a, why, Toast.LENGTH_LONG).show();
+            });
+            RenderService.end(app, why);
         });
+    }
+
+    private void applyBusy() {
+        Look.enable(masterButton, !working && songUri != null);
+        progress.setVisibility(working ? View.VISIBLE : View.GONE);
+        if (working) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     private void busy(boolean on) {
         working = on;
-        Look.enable(masterButton, !on && songUri != null);
-        progress.setVisibility(on ? View.VISIBLE : View.GONE);
-        if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        applyBusy();
     }
 
     // Mastering ---------------------------------------------------------------
@@ -836,47 +988,68 @@ public final class MainActivity extends Activity {
         final double asked = level;
         final Target target = currentTarget();
         final Uri uri = songUri;
-        final String name = song;
+        final String name = song.replaceAll("[\\\\/:*?\"<>|]", "_");
+        final String styleName = style.name();
+        final List<String> log = tasteLog();
         measureToken++;
         player.clear(); order.clear(); items.clear(); selected = 0;
         blind = BLIND_OFF; pickedShown = -1;
         player.setMatched(true);
+        previewMode = Preview.Mode.FULL;
+        player.setPreview(previewMode);
+        drawPreview();
         compareLink.setVisibility(View.GONE);
         refreshCompare();
         busy(true);
         resetPath(false);
+        progressNow = 0;
         progress.setProgress(0);
+        RenderService.begin(app);
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         final PowerManager.WakeLock lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "masterroom:render");
-        lock.acquire(40 * 60 * 1000L);
+        lock.acquire(60 * 60 * 1000L);
         worker.execute(() -> {
             try {
                 long t0 = System.nanoTime();
-                File dir = new File(getExternalFilesDir(null), "session");
+                File dir = new File(app.getExternalFilesDir(null), "session");
                 deleteAll(dir);
                 dir.mkdirs();
                 sessionDir = dir;
                 status("Opening the song");
-                Audio in = Decoder.open(this, uri);
+                Audio in = Decoder.open(app, uri);
                 File sourceFile = new File(dir, "source.wav");
                 Wav.write(sourceFile, in, 24);
+                List<Engineer.Recipe> recipes = new ArrayList<>();
+                for (Engineer.Take take : Engineer.Take.values()) recipes.add(take.recipe());
+                Engineer.Recipe mine = Taste.yours(log, styleName);
+                if (mine != null) recipes.add(mine);
                 final int[] takeIndex = {-1};
-                final int takeCount = Engineer.Take.values().length;
+                final int takeCount = recipes.size();
+                final long[] lastNote = {0};
                 Engineer.Progress bar = (step, p) -> {
                     int overall = takeIndex[0] < 0 ? p : 15 + (int) ((takeIndex[0] + Math.max(0, p - 20) / 80.0) * 85 / takeCount);
-                    main.post(() -> { statusLine.setText(step); progress.setProgress(overall); markStage(step); });
+                    long now = System.currentTimeMillis();
+                    if (now - lastNote[0] > 1000) { lastNote[0] = now; RenderService.update(app, step, overall); }
+                    main.post(() -> {
+                        statusNow = step;
+                        progressNow = overall;
+                        boolean showing = current != null;
+                        markStageQuiet(step);
+                        if (showing) { current.statusLine.setText(step); current.progress.setProgress(overall); current.lightPath(runningStage); }
+                    });
                 };
                 final String meta = trackMeta(in);
                 float[] sourceBars = WaveView.measure(in, BARS);
-                Engineer.Session session = Engineer.prepare(in, target, bar);
+                Engineer.Session session = Engineer.prepare(in, target, asked, bar);
                 final Listen before = session.before;
-                main.post(() -> { songMeta.setText(meta); showMeasured(before); });
+                main.post(() -> { setMeta(meta); measuredNow = before; ui(a -> a.showMeasured(before)); });
                 player.add(new AbPlayer.Version("Source", sourceFile, before.loudness.integrated));
-                items.add(new Item("Source", before, sourceBars, null));
+                final List<Item> made = new ArrayList<>();
+                made.add(new Item("Source", before, sourceBars, null));
                 in = null;
                 targetMid = target.midDb;
                 List<Engineer.Result> results = new ArrayList<>();
-                for (Engineer.Take take : Engineer.Take.values()) {
+                for (Engineer.Recipe take : recipes) {
                     takeIndex[0]++;
                     Engineer.Result r = Engineer.master(session, take, asked, bar);
                     float[] bars = WaveView.measure(r.master, BARS);
@@ -884,25 +1057,24 @@ public final class MainActivity extends Activity {
                     r.master = null;
                     results.add(r);
                     player.add(new AbPlayer.Version(take.label, files[0], r.after.loudness.integrated));
-                    items.add(new Item(take.label, r.after, bars, files));
+                    made.add(new Item(take.label, r.after, bars, files));
                 }
                 session.release();
-                final String text = Engineer.sheet(session, results)
+                final String text = Engineer.sheet(session, results) + albumCheck(results)
                         + String.format(Locale.US, "%nFinished in %.1f minutes", (System.nanoTime() - t0) / 60e9);
                 sheet = text;
                 main.post(() -> {
-                    busy(false);
-                    resetPath(true);
-                    statusLine.setText("Done. Your takes are ready to compare.");
-                    sheetText.setText(text);
-                    wave.setFraction(0);
+                    working = false;
+                    items.addAll(made);
                     for (int i = 0; i < player.size(); i++) order.add(i);
                     selected = 0;
                     player.select(0);
-                    refreshCompare();
-                    compareLink.setVisibility(View.VISIBLE);
-                    compareScreen.scrollTo(0, 0);
-                    showCompare(true);
+                    java.util.Arrays.fill(stageDone, true);
+                    runningStage = -1;
+                    statusNow = "Done. Your takes are ready to compare.";
+                    openCompareNext = true;
+                    RenderService.end(app, "Your takes are ready to compare");
+                    ui(a -> { a.finishRender(text); });
                 });
             } catch (Throwable e) {
                 fail(e);
@@ -912,6 +1084,27 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void finishRender(String text) {
+        applyBusy();
+        lightPath(-1);
+        statusLine.setText(statusNow);
+        sheetText.setText(text);
+        wave.setFraction(0);
+        refreshCompare();
+        compareLink.setVisibility(View.VISIBLE);
+        compareScreen.scrollTo(0, 0);
+        openCompareNext = false;
+        showCompare(true);
+    }
+
+    private static void markStageQuiet(String step) {
+        if (step.contains("riding")) for (int i = 2; i < stageDone.length; i++) stageDone[i] = false;
+        int stage = stageOf(step);
+        stageDone[stage] = true;
+        if (stage == 5) stageDone[4] = true;
+        runningStage = stage;
+    }
+
     private void importMaster(Uri uri) {
         final String name = nameOf(uri);
         importing = true;
@@ -919,7 +1112,7 @@ public final class MainActivity extends Activity {
         refreshCompare();
         worker.execute(() -> {
             try {
-                Audio a = Decoder.open(this, uri);
+                Audio a = Decoder.open(app, uri);
                 File f = new File(sessionDir, "imported_" + System.currentTimeMillis() + ".wav");
                 Wav.write(f, a, 24);
                 Listen l = Listen.to(a);
@@ -930,53 +1123,90 @@ public final class MainActivity extends Activity {
                     items.add(new Item(shortName, l, bars, null));
                     order.add(player.size() - 1);
                     importing = false;
-                    importButton.setText("Import Stem Lab master");
-                    refreshCompare();
+                    ui(x -> { x.importButton.setText("Import Stem Lab master"); x.refreshCompare(); });
                 });
             } catch (Throwable e) {
                 main.post(() -> {
                     importing = false;
-                    importButton.setText("Import Stem Lab master");
-                    refreshCompare();
+                    ui(x -> { x.importButton.setText("Import Stem Lab master"); x.refreshCompare(); });
                 });
                 fail(e);
             }
         });
+    }
+
+    private Release.Info releaseInfo() {
+        Release.Info i = new Release.Info();
+        i.title = titleField.getText().toString().trim();
+        if (i.title.isEmpty()) i.title = song;
+        i.artist = artistField.getText().toString().trim();
+        i.album = albumField.getText().toString().trim();
+        i.year = yearField.getText().toString().trim();
+        i.track = trackField.getText().toString().trim();
+        i.isrc = isrcField.getText().toString().trim().replace("-", "");
+        getSharedPreferences("release", MODE_PRIVATE).edit().putString("artist", i.artist).putString("album", i.album).putString("year", i.year).apply();
+        return i;
     }
 
     private void saveSelected() {
         if (order.isEmpty()) return;
         final Item chosen = items.get(order.get(selected));
         if (chosen.files == null) return;
+        final Release.Info info = releaseInfo();
+        final String base = info.title.replaceAll("[\\\\/:*?\"<>|]", "_") + "_" + chosen.name;
         saving = true;
         refreshCompare();
+        RenderService.begin(app);
         worker.execute(() -> {
             try {
-                for (File f : chosen.files) store(f, "audio/wav");
-                File notes = new File(sessionDir, song + "_session.txt");
+                RenderService.update(app, "Saving " + chosen.name, -1);
+                File mp3 = new File(sessionDir, base + "_320k.mp3");
+                Release.mp3(chosen.files[1], mp3, info);
+                storeWav(chosen.files[0], base + "_24bit.wav", info);
+                storeWav(chosen.files[1], base + "_16bit_44k.wav", info);
+                store(mp3, "audio/mpeg");
+                File notes = new File(sessionDir, base + "_session.txt");
                 try (PrintWriter w = new PrintWriter(new FileWriter(notes))) { w.print(sheet); }
                 store(notes, "text/plain");
+                addToAlbum(chosen);
                 main.post(() -> {
                     saving = false;
                     chosen.saved = true;
-                    refreshCompare();
-                    Toast.makeText(this, "Saved to Download/Master Room", Toast.LENGTH_LONG).show();
+                    remember("saved", chosen.name);
+                    RenderService.end(app, "Saved to Download/Master Room");
+                    ui(a -> {
+                        a.refreshCompare();
+                        a.refreshAlbum();
+                        Toast.makeText(a, "Saved to Download/Master Room", Toast.LENGTH_LONG).show();
+                    });
                 });
             } catch (Throwable e) {
-                main.post(() -> { saving = false; refreshCompare(); });
+                main.post(() -> { saving = false; ui(MainActivity::refreshCompare); });
                 fail(e);
             }
         });
     }
 
-    private void store(File f, String mime) throws IOException {
+    private static Uri newDownload(String name, String mime) throws IOException {
         ContentValues v = new ContentValues();
-        v.put(MediaStore.MediaColumns.DISPLAY_NAME, f.getName());
+        v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
         v.put(MediaStore.MediaColumns.MIME_TYPE, mime);
         v.put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Master Room");
-        Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
-        if (uri == null) throw new IOException("Could not save " + f.getName());
-        try (OutputStream out = getContentResolver().openOutputStream(uri); InputStream in = new FileInputStream(f)) {
+        Uri uri = app.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+        if (uri == null) throw new IOException("Could not save " + name);
+        return uri;
+    }
+
+    private static void storeWav(File f, String name, Release.Info info) throws IOException {
+        Uri uri = newDownload(name, "audio/wav");
+        try (OutputStream out = new java.io.BufferedOutputStream(app.getContentResolver().openOutputStream(uri), 1 << 16)) {
+            Release.copyTagged(f, out, info);
+        }
+    }
+
+    private static void store(File f, String mime) throws IOException {
+        Uri uri = newDownload(f.getName(), mime);
+        try (OutputStream out = app.getContentResolver().openOutputStream(uri); InputStream in = new FileInputStream(f)) {
             if (out == null) throw new IOException("Could not save " + f.getName());
             byte[] b = new byte[1 << 16];
             int n;
@@ -991,7 +1221,7 @@ public final class MainActivity extends Activity {
 
     // Reference shelf: only the measured numbers are stored ---------------------
 
-    private File shelf() { return new File(getFilesDir(), "references_" + style.name() + ".txt"); }
+    private File shelf() { return new File(app.getFilesDir(), "references_" + style.name() + ".txt"); }
 
     private List<Listen> shelfRecords() {
         List<Listen> out = new ArrayList<>();
@@ -1021,29 +1251,203 @@ public final class MainActivity extends Activity {
     }
 
     private Target currentTarget() {
+        List<Listen> album = albumRecords();
+        if (!album.isEmpty()) return Target.fromReferences("Album " + albumName() + ", " + album.size() + " finished song" + (album.size() == 1 ? "" : "s"), album);
         List<Listen> refs = shelfRecords();
         return refs.isEmpty() ? Target.builtIn(style) : Target.fromReferences(refs.size() + " reference records", refs);
     }
 
     private void refreshReferences() {
         int n = shelfRecords().size();
-        referenceLine.setText(n == 0 ? "Built-in curve  ·  add 3–5 records"
+        referenceLine.setText(n == 0 ? "Starting curve. Add 3 to 5 records you want to sound like."
                 : n + " reference record" + (n == 1 ? "" : "s") + " for this style.");
+        manageButton.setVisibility(n == 0 ? View.GONE : View.VISIBLE);
+        if (n == 0) shelfList.setVisibility(View.GONE);
+        drawShelf();
+    }
+
+    private List<String> shelfLines() {
+        List<String> out = new ArrayList<>();
+        File f = shelf();
+        if (!f.exists()) return out;
+        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = r.readLine()) != null) if (!line.trim().isEmpty()) out.add(line);
+        } catch (IOException ignored) { }
+        return out;
+    }
+
+    private void toggleShelf() {
+        shelfList.setVisibility(shelfList.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+    }
+
+    private void drawShelf() {
+        shelfList.removeAllViews();
+        List<String> lines = shelfLines();
+        for (int i = 0; i < lines.size(); i++) {
+            final int index = i;
+            LinearLayout r = parts.row();
+            TextView name = parts.text(lines.get(i).split("\\|")[0], Look.body, 14, Look.TEXT);
+            name.setSingleLine(true);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            r.addView(name, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+            Button remove = parts.link("REMOVE", v -> removeRecord(index));
+            Look.type(remove, Look.label, 13, Look.AMBER);
+            r.addView(remove, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
+            shelfList.addView(r);
+        }
+    }
+
+    private void removeRecord(int index) {
+        List<String> lines = shelfLines();
+        if (index >= lines.size()) return;
+        lines.remove(index);
+        try (PrintWriter w = new PrintWriter(new FileWriter(shelf()))) {
+            for (String l : lines) w.println(l);
+        } catch (IOException ignored) { }
+        refreshReferences();
+    }
+
+    // Taste: which takes you choose ---------------------------------------------
+
+    private static File tasteFile() { return new File(app.getFilesDir(), "taste.txt"); }
+
+    private static List<String> tasteLog() {
+        List<String> out = new ArrayList<>();
+        File f = tasteFile();
+        if (!f.exists()) return out;
+        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = r.readLine()) != null) out.add(line);
+        } catch (IOException ignored) { }
+        return out;
+    }
+
+    private static void remember(String how, String take) {
+        try (PrintWriter w = new PrintWriter(new FileWriter(tasteFile(), true))) {
+            w.println(Taste.record(style.name(), how, take));
+        } catch (IOException ignored) { }
+    }
+
+    // Album match: new songs aim at the album's finished tone -------------------
+
+    private static File albumFile() { return new File(app.getFilesDir(), "album.txt"); }
+
+    private static List<String> albumLines() {
+        List<String> out = new ArrayList<>();
+        File f = albumFile();
+        if (!f.exists()) return out;
+        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = r.readLine()) != null) if (!line.trim().isEmpty()) out.add(line);
+        } catch (IOException ignored) { }
+        return out;
+    }
+
+    private static String albumName() {
+        List<String> lines = albumLines();
+        return lines.isEmpty() ? "" : lines.get(0);
+    }
+
+    private List<Listen> albumRecords() {
+        List<Listen> out = new ArrayList<>();
+        List<String> lines = albumLines();
+        for (int i = 1; i < lines.size(); i++) {
+            String[] p = lines.get(i).split("\\|");
+            try {
+                if (p.length == 5) out.add(Listen.fromBands(numbers(p[3]), numbers(p[4])));
+            } catch (NumberFormatException ignored) { }
+        }
+        return out;
+    }
+
+    private void toggleAlbum() {
+        if (albumFile().exists()) {
+            albumFile().delete();
+        } else {
+            String name = albumField.getText().toString().trim();
+            try (PrintWriter w = new PrintWriter(new FileWriter(albumFile()))) {
+                w.println(name.isEmpty() ? "Current album" : name.replace("|", " "));
+            } catch (IOException ignored) { }
+        }
+        refreshAlbum();
+    }
+
+    private void refreshAlbum() {
+        List<String> lines = albumLines();
+        boolean on = !lines.isEmpty();
+        int songs = Math.max(0, lines.size() - 1);
+        albumButton.setText(on ? "END ALBUM" : "START ALBUM");
+        if (!on) albumLine.setText("Match a release in tone and loudness.");
+        else if (songs == 0) albumLine.setText(lines.get(0) + ": save a take to set its sound.");
+        else {
+            String[] first = lines.get(1).split("\\|");
+            albumLine.setText(String.format(Locale.US, "%s: %d song%s, target %s LUFS.", lines.get(0), songs, songs == 1 ? "" : "s", first[2]));
+            try {
+                double l = Double.parseDouble(first[2]);
+                if (l != level) { level = l; drawLevels(); meter.setTarget(l); refreshCeiling(); }
+            } catch (NumberFormatException ignored) { }
+        }
+    }
+
+    private static void addToAlbum(Item take) throws IOException {
+        List<String> lines = albumLines();
+        if (lines.isEmpty()) return;
+        String key = song.replace("|", " ");
+        String entry = key + "|" + String.format(Locale.US, "%.1f", take.lufs) + "|" + String.format(Locale.US, "%.0f", level) + "|" + csv(take.mid) + "|" + csv(take.side);
+        boolean replaced = false;
+        for (int i = 1; i < lines.size(); i++) {
+            if (lines.get(i).startsWith(key + "|")) { lines.set(i, entry); replaced = true; }
+        }
+        if (!replaced) lines.add(entry);
+        try (PrintWriter w = new PrintWriter(new FileWriter(albumFile()))) {
+            for (String l : lines) w.println(l);
+        }
+    }
+
+    /** How each take sits against the album so far, for the session sheet. */
+    private String albumCheck(List<Engineer.Result> results) {
+        List<String> lines = albumLines();
+        if (lines.size() < 2) return "";
+        double[] mid = new double[31];
+        int n = lines.size() - 1;
+        for (int i = 1; i < lines.size(); i++) {
+            double[] m = numbers(lines.get(i).split("\\|")[3]);
+            for (int k = 0; k < 31; k++) mid[k] += m[k] / n;
+        }
+        StringBuilder b = new StringBuilder(String.format(Locale.US, "%n%nAgainst %s:%n", lines.get(0)));
+        for (Engineer.Result r : results) {
+            double[] gap = ToneView.againstTarget(r.after.midDb, mid);
+            b.append(String.format(Locale.US, "%s: lows %+.1f dB, top end %+.1f dB%n", r.take.label, band(gap, 40, 120), band(gap, 4000, 12000)));
+        }
+        return b.toString();
+    }
+
+    private static double band(double[] gap, double from, double to) {
+        double sum = 0;
+        int n = 0;
+        for (int i = 0; i < 31; i++) if (Listen.BANDS[i] >= from && Listen.BANDS[i] <= to) { sum += gap[i]; n++; }
+        return n == 0 ? 0 : sum / n;
     }
 
     private void addReference(Uri uri) {
         final String name = nameOf(uri).replace('|', ' ');
         final File file = shelf();
         statusLine.setText("Measuring " + name);
+        statusNow = statusLine.getText().toString();
         busy(true);
         worker.execute(() -> {
             try {
-                Audio a = Decoder.open(this, uri);
+                Audio a = Decoder.open(app, uri);
                 Listen l = Listen.to(a);
                 try (PrintWriter w = new PrintWriter(new FileWriter(file, true))) {
                     w.println(name + "|" + csv(l.midDb) + "|" + csv(l.sideDb));
                 }
-                main.post(() -> { busy(false); statusLine.setText("Added " + name); refreshReferences(); });
+                main.post(() -> {
+                    working = false;
+                    statusNow = "Added " + name;
+                    ui(x -> { x.applyBusy(); x.statusLine.setText(statusNow); x.refreshReferences(); });
+                });
             } catch (Throwable e) {
                 fail(e);
             }

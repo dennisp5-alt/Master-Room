@@ -8,6 +8,7 @@ makes its decisions once, and leaves the final call to level-matched listening.
 
 | Studio step | Here |
 |---|---|
+| Restoration first | `Repair`: isolated clicks, short dropouts, a stray burst before the song |
 | Listen to the whole song first | `Listen`: BS.1770 loudness, true peak, mid and side tone in third octaves |
 | Compare with reference records | `Target`: built-in starting curve, or measured from records you load (numbers only) |
 | A few broad EQ moves, mid and side | `Eq`, `FirFilter`: four moves, 500 Hz-1 kHz left alone, linear phase |
@@ -16,8 +17,9 @@ makes its decisions once, and leaves the final call to level-matched listening.
 | Ride the fader | `Rides`: only for songs that swing too far |
 | Variable-mu bus compressor | `VariMu`: ratio rises with level, bass kept out of the detector |
 | Transformer, tape, valve | `Tone`: at 4x, at a calibrated 0 VU = -18 dBFS |
-| Clip, then limit | `Stack`: 4x soft clipper takes the sharpest peaks, then a true-peak limiter |
-| Dither and deliver | `Wav`, `Resample`: 24-bit at source rate, 16-bit 44.1 kHz |
+| Check the print | `Eq.missing`: measures what the EQ really did and corrects it, then checks the low end after the chain |
+| Clip, then limit | `Stack`: 4x soft clipper takes sudden peaks only, held notes go to a true-peak limiter |
+| Dither and deliver | `Wav`, `Resample`, `Release`: 24-bit at source rate, 16-bit 44.1 kHz, tagged 320 kbps MP3 |
 | Decide by ear | `AbPlayer`: level-matched, gapless, optional blind test, imports a Stem Lab master |
 
 Three takes: Clean, Warm, Punch. -14 LUFS uses a -1 dBTP ceiling; louder targets use -2 dBTP.

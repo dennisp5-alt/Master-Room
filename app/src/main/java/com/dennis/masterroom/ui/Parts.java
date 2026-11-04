@@ -112,6 +112,21 @@ final class Parts {
         return b;
     }
 
+    /** A labelled text entry. */
+    android.widget.EditText field(LinearLayout parent, String name, String value, int topDp) {
+        parent.addView(label(name), line(WRAP, topDp));
+        android.widget.EditText e = new android.widget.EditText(c);
+        e.setSingleLine(true);
+        e.setText(value);
+        Look.type(e, Look.body, 16, Look.TEXT);
+        e.setPadding(Look.dp(10), 0, Look.dp(10), 0);
+        e.setMinHeight(Look.dp(48));
+        e.setBackground(Look.shape(Look.WELL, Look.LINE, 5));
+        e.setContentDescription(name);
+        parent.addView(e, line(Look.dp(48), 4));
+        return e;
+    }
+
     /** A labelled numeric readout. Returns the value text so it can be updated. */
     TextView readout(LinearLayout parent, String name, String unit, int leftDp) {
         LinearLayout t = new LinearLayout(c);
