@@ -62,9 +62,9 @@ final class AbPlayer {
 
     synchronized boolean isMatched() { return matched; }
 
-    /** A listening preview on playback only. */
-    synchronized void setPreview(Preview.Mode mode) {
-        preview = mode == Preview.Mode.FULL || versions.isEmpty() ? null : new Preview(mode, versions.get(0).header.rate);
+    /** A listening preview on playback only. worn is the buds playing it, if we know them. */
+    synchronized void setPreview(Preview.Mode mode, Preview.Mode worn) {
+        preview = mode == Preview.Mode.FULL || versions.isEmpty() ? null : new Preview(mode, versions.get(0).header.rate, worn);
     }
 
     /** The playback trim on one version, in dB. */

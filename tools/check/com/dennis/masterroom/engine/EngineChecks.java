@@ -154,6 +154,17 @@ public final class EngineChecks {
         check("Phone preview keeps upper bass and top end", previewDb(Preview.Mode.PHONE, 250) > previewDb(Preview.Mode.PHONE, 1000) - 2 && previewDb(Preview.Mode.PHONE, 12000) > previewDb(Preview.Mode.PHONE, 1000) - 2,
                 String.format(Locale.US, "120 Hz %.1f, 250 Hz %.1f, 1 kHz %.1f, 3 kHz %.1f, 12 kHz %.1f dB", previewDb(Preview.Mode.PHONE, 120), previewDb(Preview.Mode.PHONE, 250), previewDb(Preview.Mode.PHONE, 1000), previewDb(Preview.Mode.PHONE, 3000), previewDb(Preview.Mode.PHONE, 12000)));
         check("Small speaker preview loses sub bass", previewDb(Preview.Mode.SMALL, 40) < previewDb(Preview.Mode.SMALL, 130) - 10, "");
+        double[] hz = {40, 100, 200, 500, 1000, 2000, 3000, 4000, 5000, 6000, 8000, 10000};
+        double[] buds2 = {1.0, 1.2, 0.8, 0.2, -0.3, -0.4, -1.6, -3.4, -3.8, -1.5, 0.9, 1.1};
+        double[] pro = {1.6, 0.8, 0.8, 0.2, -0.2, -1.0, 0.7, 1.2, 0.3, -0.8, -1.2, 0.2};
+        check("Buds2 preview follows the measurements", curveMiss(Preview.Mode.BUDS2, null, hz, buds2) < 1.0, String.format(Locale.US, "worst miss %.2f dB", curveMiss(Preview.Mode.BUDS2, null, hz, buds2)));
+        check("Buds2 Pro preview follows the measurements", curveMiss(Preview.Mode.BUDS2_PRO, null, hz, pro) < 1.0, String.format(Locale.US, "worst miss %.2f dB", curveMiss(Preview.Mode.BUDS2_PRO, null, hz, pro)));
+        check("Buds2 preview adds nothing on Buds2", curveMiss(Preview.Mode.BUDS2, Preview.Mode.BUDS2, hz, new double[hz.length]) < 0.01 && Math.abs(previewDb(Preview.Mode.BUDS2, Preview.Mode.BUDS2, 1000)) < 0.01, "");
+        double[] gap = new double[hz.length];
+        for (int i = 0; i < hz.length; i++) gap[i] = relativeDb(Preview.Mode.BUDS2_PRO, null, hz[i]) - relativeDb(Preview.Mode.BUDS2, null, hz[i]);
+        check("Buds2 Pro heard on Buds2 adds only the difference", curveMiss(Preview.Mode.BUDS2_PRO, Preview.Mode.BUDS2, hz, gap) < 0.05, String.format(Locale.US, "worst miss %.3f dB", curveMiss(Preview.Mode.BUDS2_PRO, Preview.Mode.BUDS2, hz, gap)));
+        check("Buds are recognised by name", Preview.budsNamed("Galaxy Buds2 Pro (A1B2)") == Preview.Mode.BUDS2_PRO && Preview.budsNamed("Galaxy Buds2") == Preview.Mode.BUDS2
+                && Preview.budsNamed("Dennis's Buds 2 Pro") == Preview.Mode.BUDS2_PRO && Preview.budsNamed("Galaxy Buds FE") == null && Preview.budsNamed("Galaxy Buds3 Pro") == null && Preview.budsNamed(null) == null, "");
         check("Full preview changes nothing", Math.abs(previewDb(Preview.Mode.FULL, 1000)) < 0.01, "");
 
         // Taste: nothing until there is enough to go on, then it leans towards your picks.
@@ -167,11 +178,22 @@ public final class EngineChecks {
         System.out.println(failed == 0 ? "ALL_ENGINE_CHECKS_PASS" : failed + " CHECK(S) FAILED");
         if (failed != 0) System.exit(1);
     }
-    static double previewDb(Preview.Mode mode, double hz) {
+    static double previewDb(Preview.Mode mode, double hz) { return previewDb(mode, null, hz); }
+    static double relativeDb(Preview.Mode mode, Preview.Mode worn, double hz) { return previewDb(mode, worn, hz) - previewDb(mode, worn, 1000); }
+    /** Worst miss against expected dB, with both sides lined up on their average. */
+    static double curveMiss(Preview.Mode mode, Preview.Mode worn, double[] hz, double[] want) {
+        double[] diff = new double[hz.length];
+        double mean = 0;
+        for (int i = 0; i < hz.length; i++) { diff[i] = previewDb(mode, worn, hz[i]) - want[i]; mean += diff[i] / hz.length; }
+        double worst = 0;
+        for (double d : diff) worst = Math.max(worst, Math.abs(d - mean));
+        return worst;
+    }
+    static double previewDb(Preview.Mode mode, Preview.Mode worn, double hz) {
         int rate = 48000, n = rate;
         float[] io = new float[n * 2];
         for (int i = 0; i < n; i++) io[2 * i] = io[2 * i + 1] = (float) (0.1 * Math.sin(2 * Math.PI * hz * i / rate));
-        new Preview(mode, rate).process(io, n);
+        new Preview(mode, rate, worn).process(io, n);
         double p = 0;
         for (int i = n; i < 2 * n; i++) p += io[i] * io[i];
         return 10 * Math.log10(p / n / 0.005);

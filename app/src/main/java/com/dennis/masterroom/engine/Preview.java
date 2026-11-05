@@ -1,15 +1,34 @@
 package com.dennis.masterroom.engine;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+
 /**
- * Rough listening previews for the comparison player only. They suggest how a small
- * device tends to change a master. They are general curves, not measurements of any
- * product, and they never touch a file.
+ * Listening previews for the comparison player only. They never touch a file.
+ *
+ * Phone and Small are rough general curves. The two Galaxy Buds curves are built from
+ * published measurements (oratory1990, crinacle, Rtings, Kazi, HypetheSonics, Super Review,
+ * collected in the AutoEq database): each rig's difference from the Harman in-ear target,
+ * aligned over 300 Hz to 2 kHz, then the median, then a few broad filters that land within
+ * 1 dB of it from 35 Hz to 10 kHz. Rigs disagree by several dB above 8 kHz, so the top is
+ * the least certain part.
  */
 public final class Preview {
     public enum Mode {
-        FULL("Full"), PHONE("Phone"), BUDS("Buds"), SMALL("Small"), MONO("Mono");
+        FULL("Full"), PHONE("Phone"), SMALL("Small"), MONO("Mono"), BUDS2("Buds2"), BUDS2_PRO("Buds2 Pro");
         public final String label;
         Mode(String label) { this.label = label; }
+        public boolean buds() { return this == BUDS2 || this == BUDS2_PRO; }
+    }
+
+    /** Which of the two measured buds a Bluetooth device name means, or null. */
+    public static Mode budsNamed(String name) {
+        if (name == null) return null;
+        String n = name.toLowerCase(Locale.ROOT).replaceAll("[\\s_-]+", "");
+        if (n.contains("buds2pro")) return Mode.BUDS2_PRO;
+        return n.contains("buds2") ? Mode.BUDS2 : null;
     }
 
     private static final class Biquad {
@@ -49,19 +68,43 @@ public final class Preview {
                 (a + 1) - (a - 1) * c + r, 2 * ((a - 1) - (a + 1) * c), (a + 1) - (a - 1) * c - r);
     }
 
+    /** The tuning of one of the buds. A negative sign undoes it exactly. */
+    private static List<Biquad> buds(Mode mode, double sign, int rate) {
+        if (mode == Mode.BUDS2) return Arrays.asList(
+                lowShelf(350, sign * 1.0, rate), bell(4500, 1.4, sign * -4.3, rate), highShelf(7000, sign * 1.3, rate));
+        return Arrays.asList(
+                lowShelf(35, sign * 1.6, rate), lowShelf(320, sign * 0.8, rate), bell(2000, 1.5, sign * -1.1, rate),
+                bell(3900, 1.8, sign * 1.7, rate), bell(8000, 1.6, sign * -1.8, rate), highShelf(12000, sign * 3.0, rate));
+    }
+
+    /** Keeps a buds preview level with Full, with a little more room when two curves stack. */
+    private static final float BUDS_GAIN = 0.95f, BUDS_DIFFERENCE_GAIN = 0.8f;
+
     private final Biquad[] chain;
     private final float width, gain;
 
-    public Preview(Mode mode, int rate) {
+    public Preview(Mode mode, int rate) { this(mode, rate, null); }
+
+    /**
+     * @param worn the buds actually playing this, or null. They are already adding their own
+     *             tuning, so a buds preview adds only the difference, and nothing on the same buds.
+     */
+    public Preview(Mode mode, int rate, Mode worn) {
+        if (mode.buds()) {
+            List<Biquad> c = new ArrayList<>();
+            if (mode != worn) {
+                c.addAll(buds(mode, 1, rate));
+                if (worn != null) c.addAll(buds(worn, -1, rate));
+            }
+            chain = c.toArray(new Biquad[0]);
+            width = 1f; gain = c.isEmpty() ? 1f : worn != null ? BUDS_DIFFERENCE_GAIN : BUDS_GAIN;
+            return;
+        }
         switch (mode) {
             case PHONE:
                 // A current flagship: real stereo and useful upper bass, only the deep lows missing.
                 chain = new Biquad[]{high(150, 0.8, rate), high(150, 0.8, rate), bell(320, 1.0, 1.5, rate), bell(3000, 1.2, 1.5, rate), low(17000, 0.7, rate)};
                 width = 0.7f; gain = 0.75f;
-                break;
-            case BUDS:
-                chain = new Biquad[]{lowShelf(90, 4, rate), bell(450, 1.0, -1.5, rate), highShelf(7000, 2, rate)};
-                width = 1f; gain = 0.6f;
                 break;
             case SMALL:
                 chain = new Biquad[]{high(85, 0.7, rate), high(85, 0.7, rate), bell(130, 1.2, 5, rate), bell(900, 1.0, -2, rate), low(15000, 0.7, rate)};

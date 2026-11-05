@@ -263,6 +263,11 @@ public class UiSmokeTest {
         tap("Phone");
         assertTrue(hasText("preview"));
         shot("compare_preview");
+        tap("Buds2");
+        assertTrue(hasText("Measured tuning of the Galaxy Buds2"));
+        tap("Buds2 Pro");
+        assertTrue(hasText("Measured tuning of the Galaxy Buds2 Pro"));
+        shot("compare_preview_buds");
         tap("Full");
         assertFalse(hasText("preview"));
 

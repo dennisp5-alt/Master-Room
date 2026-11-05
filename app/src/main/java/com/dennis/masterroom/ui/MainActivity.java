@@ -105,7 +105,7 @@ public final class MainActivity extends Activity {
 
     private TextView albumLine, tasteLine, previewNote;
     private int routeTick;
-    private boolean lastSpeaker;
+    private String lastRoute = "";
     private Button albumButton, manageButton;
     private LinearLayout dock, shelfList, previewRow, releasePanel, checkPanel, spotRows;
     private TextView checkLine;
@@ -589,8 +589,9 @@ public final class MainActivity extends Activity {
         matchButton = parts.button("", v -> toggleMatch());
         match.addView(matchButton, Parts.line(Look.dp(48), 8));
         match.addView(parts.label("LISTEN ON"), Parts.line(Parts.WRAP, 12));
-        previewRow = parts.row();
-        match.addView(previewRow, Parts.line(Look.dp(48), 6));
+        previewRow = new LinearLayout(this);
+        previewRow.setOrientation(LinearLayout.VERTICAL);
+        match.addView(previewRow, Parts.line(Parts.WRAP, 6));
         previewNote = parts.text("Rough preview of a typical device, not a measurement. Your files are not changed.", Look.body, 12, Look.DIM);
         previewNote.setVisibility(View.GONE);
         match.addView(previewNote, Parts.line(Parts.WRAP, 6));
@@ -705,27 +706,48 @@ public final class MainActivity extends Activity {
 
     private void drawPreview() {
         previewRow.removeAllViews();
-        for (Preview.Mode m : Preview.Mode.values()) {
-            final Preview.Mode pick = m;
-            Button b = parts.segment(m.label, m == previewMode, Look.strong, v -> {
+        Preview.Mode[] modes = Preview.Mode.values();
+        LinearLayout r = null;
+        for (int i = 0; i < modes.length; i++) {
+            if (i % 3 == 0) { r = parts.row(); previewRow.addView(r, Parts.line(Look.dp(48), i == 0 ? 0 : 6)); }
+            final Preview.Mode pick = modes[i];
+            Button b = parts.segment(pick.label, pick == previewMode, Look.strong, v -> {
                 previewMode = pick;
                 applyPreview();
                 drawPreview();
             });
-            Look.type(b, Look.strong, 14, m == previewMode ? Look.BG : Look.TEXT);
+            Look.type(b, Look.strong, 14, pick == previewMode ? Look.BG : Look.TEXT);
             b.setPadding(0, 0, 0, 0);
-            previewRow.addView(b);
+            r.addView(b);
         }
         boolean speaker = onPhoneSpeaker();
+        Preview.Mode worn = wornBuds();
         previewNote.setVisibility(previewMode == Preview.Mode.FULL ? View.GONE : View.VISIBLE);
         if (previewMode == Preview.Mode.PHONE && speaker) previewNote.setText("You are on the phone's speaker now, so this is the real thing. No preview added.");
+        else if (previewMode.buds() && previewMode == worn) previewNote.setText("You are on your Galaxy " + worn.label + " now, so this is the real thing. No preview added.");
+        else if (previewMode.buds() && worn != null) previewNote.setText("Adding only the difference between your " + worn.label + " and the " + previewMode.label + ". Your files are not changed.");
+        else if (previewMode.buds() && speaker) previewNote.setText("Measured tuning of the Galaxy " + previewMode.label + ". Use headphones for this one: your phone's speaker changes the sound as well.");
+        else if (previewMode.buds()) previewNote.setText("Measured tuning of the Galaxy " + previewMode.label + ", from published tests. Fit changes the bass. Your files are not changed.");
         else if (speaker && previewMode != Preview.Mode.MONO) previewNote.setText("Rough preview. Use headphones for this one: your phone's speaker changes the sound as well.");
         else previewNote.setText("Rough preview of a typical device, not a measurement. Your files are not changed.");
     }
 
-    /** The phone preview on the phone's own speaker would apply the same change twice. */
+    /** A preview of the thing you are already listening on would apply the same change twice. */
     private void applyPreview() {
-        player.setPreview(previewMode == Preview.Mode.PHONE && onPhoneSpeaker() ? Preview.Mode.FULL : previewMode);
+        boolean real = previewMode == Preview.Mode.PHONE && onPhoneSpeaker();
+        player.setPreview(real ? Preview.Mode.FULL : previewMode, wornBuds());
+    }
+
+    /** Galaxy Buds2 or Buds2 Pro when they are connected under their usual name, otherwise null. */
+    private Preview.Mode wornBuds() {
+        AudioManager audio = (AudioManager) getSystemService(AUDIO_SERVICE);
+        for (AudioDeviceInfo d : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            int t = d.getType();
+            if (t != AudioDeviceInfo.TYPE_BLUETOOTH_A2DP && t != AudioDeviceInfo.TYPE_BLE_HEADSET) continue;
+            Preview.Mode m = Preview.budsNamed(String.valueOf(d.getProductName()));
+            if (m != null) return m;
+        }
+        return null;
     }
 
     private boolean onPhoneSpeaker() {
@@ -997,8 +1019,8 @@ public final class MainActivity extends Activity {
             // Follow headphones being connected or removed.
             if (++routeTick >= 10) {
                 routeTick = 0;
-                boolean speaker = onPhoneSpeaker();
-                if (speaker != lastSpeaker) { lastSpeaker = speaker; applyPreview(); drawPreview(); }
+                String route = onPhoneSpeaker() + " " + wornBuds();
+                if (!route.equals(lastRoute)) { lastRoute = route; applyPreview(); drawPreview(); }
             }
         }
         main.postDelayed(this::tick, 100);
