@@ -456,11 +456,22 @@ public final class MainActivity extends Activity {
         styleRow.addView(ref, new LinearLayout.LayoutParams(Look.dp(81), Look.dp(48)));
 
         genreList.removeAllViews();
-        Target.Style[] all = Target.Style.values();
         LinearLayout r = null;
-        for (int i = 0; i < all.length; i++) {
-            if (i % 2 == 0) { r = parts.row(); genreList.addView(r, Parts.line(Look.dp(48), i == 0 ? 0 : 6)); }
-            final Target.Style pick = all[i];
+        int inRow = 0;
+        for (final Target.Style pick : Target.Style.values()) {
+            String family = familyStarting(pick);
+            if (family != null) {
+                TextView heading = parts.text(family, Look.label, 11, Look.DIM);
+                heading.setLetterSpacing(0.08f);
+                heading.setPadding(Look.dp(3), Look.dp(family.equals("COUNTRY AND ROOTS") ? 2 : 8), 0, Look.dp(3));
+                genreList.addView(heading, Parts.line(Parts.WRAP, 0));
+                r = null;
+            }
+            if (r == null || inRow == 3) {
+                r = parts.row();
+                genreList.addView(r, Parts.line(Look.dp(40), 4));
+                inRow = 0;
+            }
             Button b = parts.segment(pick.label, pick == style, Look.strong, v -> {
                 style = pick;
                 getSharedPreferences("choices", MODE_PRIVATE).edit().putString("style", pick.name()).apply();
@@ -468,8 +479,31 @@ public final class MainActivity extends Activity {
                 drawStyles();
                 refreshReferences();
             });
+            Look.type(b, Look.strong, 12, pick == style ? Look.BG : Look.TEXT);
             b.setPadding(0, 0, 0, 0);
-            r.addView(b);
+            b.setMinimumHeight(0);
+            b.setMinHeight(0);
+            b.setMaxLines(1);
+            LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, Look.dp(40), 1);
+            size.setMargins(Look.dp(3), 0, Look.dp(3), 0);
+            r.addView(b, size);
+            inRow++;
+        }
+        // Keeps a short last row from stretching across the screen.
+        for (; inRow > 0 && inRow < 3; inRow++) {
+            View spare = new View(this);
+            r.addView(spare, Parts.share(Look.dp(40), 1, 6));
+        }
+    }
+
+    private static String familyStarting(Target.Style s) {
+        switch (s) {
+            case COUNTRY: return "COUNTRY AND ROOTS";
+            case ROCK: return "ROCK";
+            case POP: return "POP AND DANCE";
+            case RNB_SOUL: return "SOUL AND URBAN";
+            case JAZZ: return "OTHER";
+            default: return null;
         }
     }
 

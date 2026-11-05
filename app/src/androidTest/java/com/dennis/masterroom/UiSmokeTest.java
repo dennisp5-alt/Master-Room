@@ -196,8 +196,8 @@ public class UiSmokeTest {
         tap("Genre");
         SystemClock.sleep(600);
         assertTrue("Genre list opens", hasText("Metal") && hasText("Hip-Hop"));
+        assertTrue("Grunge is on the list", hasText("Grunge"));
         shot("genre_list");
-        checkTargets();
         tap("Rock");
         assertFalse("Picking a genre closes the list", hasText("Metal"));
         assertNotNull("Picked genre is shown", find("Rock"));

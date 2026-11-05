@@ -36,24 +36,59 @@ public final class Target {
      * common mastering practice. All are starting points; reference records replace them.
      */
     public enum Style {
+        // Country and roots
         COUNTRY("Country", -0.4, 0.0, 0.5, 0.0),
         CLASSIC_COUNTRY("Classic Country", -1.2, 0.0, 0.8, -1.0),
         COUNTRY_ROCK("Country Rock", 0.0, 0.2, 0.5, -0.1),
+        BUSH_COUNTRY("Bush Country", -0.8, 0.1, 0.7, -0.6),
+        ALT_COUNTRY("Alt Country", -0.4, 0.4, 0.2, -0.8),
+        HONKY_TONK("Honky Tonk", -1.0, 0.2, 0.7, -0.8),
+        BLUEGRASS("Bluegrass", -1.6, 0.0, 0.6, 0.0),
         FOLK("Folk / Americana", -1.0, 0.2, 0.3, -2.5),
         ACOUSTIC("Acoustic", -1.5, 0.3, 0.4, -1.0),
+        SONGWRITER("Songwriter", -1.2, 0.2, 0.6, -0.6),
         BLUES("Blues", -0.3, 0.6, 0.2, -1.2),
+        GOSPEL("Gospel", 0.2, 0.2, 0.4, -0.2),
+        // Rock
         ROCK("Rock", 0.4, 0.3, 0.3, -0.3),
+        CLASSIC_ROCK("Classic Rock", 0.0, 0.5, 0.2, -1.0),
+        SOUTHERN_ROCK("Southern Rock", 0.1, 0.4, 0.4, -0.6),
         HARD_ROCK("Hard Rock", 0.4, -0.4, 1.2, 0.3),
+        GLAM_METAL("Glam Metal", 0.2, -0.5, 1.0, 0.8),
         METAL("Metal", 0.6, -1.0, 1.6, 0.6),
+        GRUNGE("Grunge", 0.6, 0.6, 0.5, -0.8),
+        PUNK("Punk", 0.2, -0.2, 1.0, 0.0),
         INDIE("Indie", -0.3, 0.5, 0.0, -0.6),
+        ALT_ROCK("Alt Rock", 0.3, 0.3, 0.4, -0.3),
+        POP_ROCK("Pop Rock", 0.5, -0.2, 0.5, 0.4),
+        SOFT_ROCK("Soft Rock", -0.2, 0.2, 0.2, 0.2),
+        PROG_ROCK("Prog Rock", 0.1, 0.2, 0.1, 0.0),
+        POWER_BALLAD("Power Ballad", 0.3, 0.0, 0.5, 0.6),
+        // Pop and dance
         POP("Pop", 0.8, -0.4, 0.4, 0.8),
         EIGHTIES_POP("80s Pop", -0.8, -0.6, 0.8, 1.2),
+        SYNTH_POP("Synth Pop", 0.6, -0.4, 0.3, 1.2),
+        DANCE_POP("Dance Pop", 1.6, -0.5, 0.3, 1.4),
+        EURODANCE("Eurodance", 1.8, -0.6, 0.4, 1.6, 45),
         FUNK_DISCO("Funk / Disco", 1.2, -0.3, 0.3, 1.9),
-        RNB_SOUL("R&B / Soul", 0.0, 0.0, 0.0, -0.9),
-        HIP_HOP("Hip-Hop", 3.0, -0.8, 0.2, 1.8, 38),
         ELECTRONIC("Electronic", 2.5, -0.6, -0.2, 2.5, 38),
+        HOUSE("House", 2.2, -0.6, 0.0, 1.8, 40),
+        TRANCE("Trance", 1.8, -0.7, 0.2, 2.0, 40),
+        DRUM_BASS("Drum & Bass", 2.6, -0.8, 0.2, 1.6, 38),
+        // Soul and urban
+        RNB_SOUL("R&B / Soul", 0.0, 0.0, 0.0, -0.9),
+        MOTOWN("Motown", -0.6, 0.3, 0.6, -1.0),
+        HIP_HOP("Hip-Hop", 3.0, -0.8, 0.2, 1.8, 38),
+        TRAP("Trap", 3.0, -1.0, 0.2, 2.0, 35),
         REGGAE("Reggae", 2.2, 0.3, -0.6, -1.0, 40),
-        JAZZ("Jazz", -1.5, 0.3, -0.2, -3.0);
+        // Other
+        JAZZ("Jazz", -1.5, 0.3, -0.2, -3.0),
+        SWING("Swing", -1.4, 0.3, 0.0, -2.0),
+        LATIN("Latin", 1.0, -0.2, 0.4, 0.6),
+        LOFI("Lo-Fi", 0.4, 0.6, -1.0, -3.0),
+        AMBIENT("Ambient", 0.2, 0.2, -0.6, 0.4),
+        CINEMATIC("Cinematic", 0.6, -0.3, -0.4, 0.2),
+        CLASSICAL("Classical", -0.6, 0.0, -0.4, -1.2);
         public final String label;
         final double low, lowMid, presence, air, subHz;
         Style(String label, double low, double lowMid, double presence, double air) {
