@@ -191,6 +191,21 @@ public final class EngineChecks {
         check("Clean-up catches a ringing resonance", ringOut.resonanceMaxDb > 1.5, String.format(Locale.US, "cut %.1f dB, active %.0f%%", ringOut.resonanceMaxDb, ringOut.resonancePercent));
         check("Clean-up keeps the length", rung.frames() == ringing.frames(), "");
 
+        // Noise: finds what is really there, and leaves the music alone.
+        Noise.Finding hushed = Noise.find(noisy(0, 0));
+        Audio hissy = noisy(0.0008, 0);
+        Noise.Finding hissFound = Noise.find(hissy);
+        Audio eased = hissy.copy();
+        Noise.apply(eased, hissFound);
+        check("Silence between phrases is not called hiss", !hushed.found(), hushed.describe());
+        check("Hiss is found", hissFound.hiss, hissFound.describe());
+        check("Hiss comes down in the quiet", edgeLevel(eased, 0, 2) < edgeLevel(hissy, 0, 2) - 3, "");
+        check("Noise fix leaves loud music alone", Math.abs(edgeLevel(eased, 9, 13) - edgeLevel(hissy, 9, 13)) < 0.2, "");
+        Noise.Finding whine = Noise.find(noisy(0, 0.002));
+        check("A steady whine is found", whine.tonesHz.size() == 1 && Math.abs(whine.tonesHz.get(0) - 15625) < 15, whine.describe());
+        Noise.Finding clearSong = Noise.find(steady);
+        check("Steady music is not called noise", !clearSong.found(), clearSong.describe());
+
         // Sections: hears a clear verse and chorus, and leaves a flat song alone.
         int r441 = 44100, parts = 60;
         Audio shaped = new Audio(parts * r441, r441), flat = new Audio(parts * r441, r441);
@@ -243,6 +258,25 @@ public final class EngineChecks {
 
         System.out.println(failed == 0 ? "ALL_ENGINE_CHECKS_PASS" : failed + " CHECK(S) FAILED");
         if (failed != 0) System.exit(1);
+    }
+    /** A short song with gaps between phrases, plus any hiss and a 15.6 kHz whine. */
+    static Audio noisy(double hiss, double whine) {
+        int rate = 48000, n = 30 * rate;
+        Audio a = new Audio(n, rate);
+        java.util.Random q = new java.util.Random(9);
+        for (int i = 0; i < n; i++) {
+            double t = (double) i / rate, w = whine * Math.sin(2 * Math.PI * 15625 * t);
+            double on = t > 3 && t < 27 && ((int) (t / 8)) % 4 != 3 ? 1 : 0;
+            a.l[i] = (float) (on * 0.04 * q.nextGaussian() + hiss * q.nextGaussian() + w);
+            a.r[i] = (float) (on * 0.04 * q.nextGaussian() + hiss * q.nextGaussian() + w);
+        }
+        return a;
+    }
+    static double edgeLevel(Audio a, double from, double to) {
+        double e = 0;
+        int x = (int) (from * a.rate), y = (int) (to * a.rate);
+        for (int i = x; i < y; i++) e += a.l[i] * a.l[i];
+        return 10 * Math.log10(e / (y - x) + 1e-20);
     }
     static double band2(Target t, double hz) {
         int k = 0;

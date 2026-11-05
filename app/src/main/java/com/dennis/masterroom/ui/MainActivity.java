@@ -1364,7 +1364,9 @@ public final class MainActivity extends Activity {
                 sourceFlatPeaks = session.sourceFlatPeaks;
                 main.post(() -> { setMeta(meta); measuredNow = before; ui(a -> a.showMeasured(before)); });
                 final List<Item> made = new ArrayList<>();
-                made.add(new Item("Source", before, sourceBars, null));
+                Item sourceItem = new Item("Source", before, sourceBars, null);
+                sourceItem.streaming = session.noise;
+                made.add(sourceItem);
                 List<Engineer.Result> results = new ArrayList<>();
                 for (Engineer.Recipe take : recipes) {
                     takeIndex[0]++;

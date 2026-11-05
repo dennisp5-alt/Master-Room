@@ -74,6 +74,8 @@ public final class Engineer {
     public static final class Session {
         public Listen before;
         public int sourceFlatPeaks;
+        /** What the hiss, whine and hum check found, in plain words. */
+        public String noise = "";
         public Target target;
         Eq.Moves moves;
         public final List<String> notes = new ArrayList<>();
@@ -169,6 +171,15 @@ public final class Engineer {
         s.sourceFlatPeaks = flat;
         double limit = target.reach() + 1.0;
         Audio clean = fixed.audio;
+        p.at("Cleaning up: listening for hiss and whine", 5);
+        Noise.Finding noise = Noise.find(clean);
+        if (noise.found() && options.cleanUp) {
+            Noise.apply(clean, noise);
+            s.noise = noise.describe() + String.format(Locale.US, ". Eased by up to %.0f dB in quiet moments", noise.most);
+        } else {
+            s.noise = noise.describe() + (noise.found() ? ". Left in, because Clean-up is off" : "");
+        }
+        s.notes.add(s.noise);
         if (options.cleanUp) {
             p.at("Cleaning up resonances and swirl", 5);
             CleanUp.Outcome c = new CleanUp.Outcome();

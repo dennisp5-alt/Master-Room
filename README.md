@@ -19,6 +19,7 @@ makes its decisions once, and leaves the final call to level-matched listening.
 | Transformer, tape, valve | `Tone`: at 4x, at a calibrated 0 VU = -18 dBFS |
 | Check the print | `Eq.missing`: measures what the EQ really did and corrects it, then checks the low end after the chain |
 | Clip, then limit | `Stack`: 4x soft clipper takes sudden peaks only, held notes go to a true-peak limiter |
+| Noise | `Noise`: listens to the song's quiet moments for hiss, whine and hum that never change, and eases them only while the music is close to them |
 | Clean-up | `CleanUp`: turns down narrow resonances only while they ring, and eases top-end specks that stand alone in time. Can be switched off |
 | Sections | `Sections`: finds quieter and bigger parts of the song, corrects each slightly towards the whole, and lifts the centre if it loses ground in the big parts |
 | Density | `Density`: on loud masters, eases each band's loudest moments so the limiter does less |
