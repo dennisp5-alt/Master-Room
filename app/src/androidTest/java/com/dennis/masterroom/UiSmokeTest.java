@@ -192,7 +192,17 @@ public class UiSmokeTest {
         scroll(false);
         shot("session_loaded");
         checkTargets();
+        assertFalse("Genre list starts closed", hasText("Metal"));
+        tap("Genre");
+        SystemClock.sleep(600);
+        assertTrue("Genre list opens", hasText("Metal") && hasText("Hip-Hop"));
+        shot("genre_list");
+        checkTargets();
         tap("Rock");
+        assertFalse("Picking a genre closes the list", hasText("Metal"));
+        assertNotNull("Picked genre is shown", find("Rock"));
+        tap("Genre");
+        SystemClock.sleep(600);
         tap("Country");
         tap("-12");
         assertTrue(hasText("ceiling -2.0 dBTP"));

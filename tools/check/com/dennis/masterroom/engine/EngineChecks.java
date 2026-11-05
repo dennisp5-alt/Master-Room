@@ -149,6 +149,19 @@ public final class EngineChecks {
         Distortion.Report bad = Distortion.check(song, crushed);
         check("Heavy clipping is caught", bad.audible > 0, bad.audible + " spots, worst " + Math.round(bad.worstDb) + " dB");
 
+        // Genres: each its own curve, none far enough from the rest to force a big move.
+        java.util.Set<String> curves = new java.util.HashSet<>();
+        double furthest = 0;
+        Target home = Target.builtIn(Target.Style.COUNTRY);
+        for (Target.Style g : Target.Style.values()) {
+            Target t = Target.builtIn(g);
+            curves.add(java.util.Arrays.toString(t.midDb));
+            for (int i = 0; i < 31; i++) if (Listen.BANDS[i] >= 60 && Listen.BANDS[i] <= 16000) furthest = Math.max(furthest, Math.abs(tilted(t, i) - tilted(home, i)));
+        }
+        check("Every genre has its own curve", curves.size() == Target.Style.values().length, curves.size() + " curves");
+        check("Genre curves stay within reach", furthest < 5, String.format(Locale.US, "furthest from Country %.1f dB", furthest));
+        check("Hip-Hop has more lows than Jazz, Electronic more top", band(Target.Style.HIP_HOP, 60) > band(Target.Style.JAZZ, 60) + 3 && band(Target.Style.ELECTRONIC, 12000) > band(Target.Style.JAZZ, 12000) + 3, "");
+
         // Previews: playback-only curves do what their names say.
         check("Phone preview loses deep bass", previewDb(Preview.Mode.PHONE, 60) < previewDb(Preview.Mode.PHONE, 1000) - 20, String.format(Locale.US, "60 Hz %.1f dB, 1 kHz %.1f dB", previewDb(Preview.Mode.PHONE, 60), previewDb(Preview.Mode.PHONE, 1000)));
         check("Phone preview keeps upper bass and top end", previewDb(Preview.Mode.PHONE, 250) > previewDb(Preview.Mode.PHONE, 1000) - 2 && previewDb(Preview.Mode.PHONE, 12000) > previewDb(Preview.Mode.PHONE, 1000) - 2,
@@ -177,6 +190,17 @@ public final class EngineChecks {
 
         System.out.println(failed == 0 ? "ALL_ENGINE_CHECKS_PASS" : failed + " CHECK(S) FAILED");
         if (failed != 0) System.exit(1);
+    }
+    /** A curve's level at one band, lined up on 1 kHz. */
+    static double tilted(Target t, int band) {
+        int k = 0;
+        for (int i = 0; i < 31; i++) if (Math.abs(Listen.BANDS[i] - 1000) < Math.abs(Listen.BANDS[k] - 1000)) k = i;
+        return t.midDb[band] - t.midDb[k];
+    }
+    static double band(Target.Style s, double hz) {
+        int k = 0;
+        for (int i = 0; i < 31; i++) if (Math.abs(Listen.BANDS[i] - hz) < Math.abs(Listen.BANDS[k] - hz)) k = i;
+        return tilted(Target.builtIn(s), k);
     }
     static double previewDb(Preview.Mode mode, double hz) { return previewDb(mode, null, hz); }
     static double relativeDb(Preview.Mode mode, Preview.Mode worn, double hz) { return previewDb(mode, worn, hz) - previewDb(mode, worn, 1000); }

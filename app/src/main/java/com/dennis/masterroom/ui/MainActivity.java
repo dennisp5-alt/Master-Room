@@ -91,7 +91,7 @@ public final class MainActivity extends Activity {
     private Parts parts;
 
     private ScrollView sessionScreen, compareScreen;
-    private LinearLayout column, styleRow, levelRow, versionList;
+    private LinearLayout column, styleRow, genreList, levelRow, versionList;
     private TextView songName, songMeta, songAction, measuredLufs, measuredPeak, measuredRange, ceilingLine;
     private TextView referenceLine, statusLine, sheetText, selectedName, timeNow, matchLine, matchState, blindLine, blindState, compareBadge;
     private Button compareLink, masterButton, takeButton, importButton, waveTab, toneTab, matchButton, blindButton;
@@ -136,6 +136,9 @@ public final class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        try {
+            style = Target.Style.valueOf(getSharedPreferences("choices", MODE_PRIVATE).getString("style", style.name()));
+        } catch (IllegalArgumentException ignored) { }
         app = getApplicationContext();
         current = this;
         Look.load(this);
@@ -316,6 +319,10 @@ public final class MainActivity extends Activity {
         controls.addView(styleTitle);
         styleRow = parts.row();
         controls.addView(styleRow, Parts.line(Look.dp(48), 5));
+        genreList = new LinearLayout(this);
+        genreList.setOrientation(LinearLayout.VERTICAL);
+        genreList.setVisibility(View.GONE);
+        controls.addView(genreList, Parts.line(Parts.WRAP, 6));
         referenceLine = parts.text("", Look.body, 11, Look.DIM);
         referenceLine.setSingleLine(true);
         referenceLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -407,15 +414,53 @@ public final class MainActivity extends Activity {
 
     private void drawStyles() {
         styleRow.removeAllViews();
-        for (Target.Style s : Target.Style.values()) {
-            final Target.Style pick = s;
-            String n = s.name().charAt(0) + s.name().substring(1).toLowerCase(Locale.US);
-            styleRow.addView(parts.segment(n, s == style, Look.strong, v -> { style = pick; drawStyles(); refreshReferences(); }));
-        }
+        LinearLayout current = parts.row();
+        current.setPadding(Look.dp(14), 0, Look.dp(6), 0);
+        Look.surface(current, Look.shape(Look.RAISED, Look.AMBER, 9));
+        current.setClickable(true);
+        current.setContentDescription("Genre");
+        current.setOnClickListener(v -> toggleGenres());
+        current.addView(parts.text(style.label, Look.strong, 16, Look.TEXT), new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        ImageView chevron = new ImageView(this);
+        chevron.setImageResource(R.drawable.ic_chevron);
+        chevron.setRotation(genreList.getVisibility() == View.VISIBLE ? 180 : 0);
+        current.addView(chevron, new LinearLayout.LayoutParams(Look.dp(32), Look.dp(32)));
+        LinearLayout.LayoutParams wide = new LinearLayout.LayoutParams(0, Look.dp(48), 1);
+        wide.setMargins(Look.dp(3), 0, Look.dp(3), 0);
+        styleRow.addView(current, wide);
         Button ref = parts.link("ADD RECORD", v -> pick(PICK_REFERENCE));
         Look.type(ref, Look.label, 12, Look.AMBER);
         ref.setLetterSpacing(0.01f);
         styleRow.addView(ref, new LinearLayout.LayoutParams(Look.dp(81), Look.dp(48)));
+
+        genreList.removeAllViews();
+        Target.Style[] all = Target.Style.values();
+        LinearLayout r = null;
+        for (int i = 0; i < all.length; i++) {
+            if (i % 2 == 0) { r = parts.row(); genreList.addView(r, Parts.line(Look.dp(48), i == 0 ? 0 : 6)); }
+            final Target.Style pick = all[i];
+            Button b = parts.segment(pick.label, pick == style, Look.strong, v -> {
+                style = pick;
+                getSharedPreferences("choices", MODE_PRIVATE).edit().putString("style", pick.name()).apply();
+                genreList.setVisibility(View.GONE);
+                drawStyles();
+                refreshReferences();
+            });
+            b.setPadding(0, 0, 0, 0);
+            r.addView(b);
+        }
+    }
+
+    /** Opens the list with the top of it in view, clear of the master button. */
+    private void toggleGenres() {
+        boolean open = genreList.getVisibility() != View.VISIBLE;
+        genreList.setVisibility(open ? View.VISIBLE : View.GONE);
+        drawStyles();
+        if (open) main.postDelayed(() -> {
+            android.graphics.Rect at = new android.graphics.Rect();
+            sessionScreen.offsetDescendantRectToMyCoords(styleRow, at);
+            sessionScreen.smoothScrollTo(0, at.top - Look.dp(10));
+        }, 80);
     }
 
     private void drawLevels() {
@@ -1442,8 +1487,11 @@ public final class MainActivity extends Activity {
 
     private void refreshReferences() {
         int n = shelfRecords().size();
-        referenceLine.setText(n == 0 ? "Starting curve. Add 3 to 5 records you want to sound like."
-                : n + " reference record" + (n == 1 ? "" : "s") + " for this style.");
+        boolean album = !albumRecords().isEmpty();
+        String records = n + " reference record" + (n == 1 ? "" : "s");
+        referenceLine.setText(album ? (n == 0 ? "Album match is setting the tone, not the genre." : records + ", but album match sets the tone.")
+                : n == 0 ? "Starting curve. Add 3 to 5 records you want to sound like."
+                : records + " for " + style.label + ".");
         manageButton.setVisibility(n == 0 ? View.GONE : View.VISIBLE);
         if (n == 0) shelfList.setVisibility(View.GONE);
         drawShelf();
@@ -1571,6 +1619,7 @@ public final class MainActivity extends Activity {
                 if (l != level) { level = l; drawLevels(); meter.setTarget(l); refreshCeiling(); }
             } catch (NumberFormatException ignored) { }
         }
+        refreshReferences();
     }
 
     private static void addToAlbum(Item take) throws IOException {
