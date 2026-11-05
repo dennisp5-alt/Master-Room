@@ -23,7 +23,10 @@ final class Repair {
 
     private static final class Gap { int from, to; boolean dropout; Gap(int f, int t, boolean d) { from = f; to = t; dropout = d; } }
 
-    static Outcome apply(Audio in) {
+    static Outcome apply(Audio in) { return apply(in, false); }
+
+    /** @param own the caller is finished with this audio, so it can be repaired where it lies */
+    static Outcome apply(Audio in, boolean own) {
         Outcome o = new Outcome();
         o.audio = in;
         List<Gap> left = gaps(in.l, in.rate), right = gaps(in.r, in.rate);
@@ -32,7 +35,7 @@ final class Repair {
         if (count(left, false) > MAX_PER_MINUTE * minutes) dropClicks(left);
         if (count(right, false) > MAX_PER_MINUTE * minutes) dropClicks(right);
         if (left.isEmpty() && right.isEmpty() && burstEnd == 0) return o;
-        Audio out = in.copy();
+        Audio out = own ? in : in.copy();
         for (Gap g : left) fill(out.l, g);
         for (Gap g : right) fill(out.r, g);
         o.clicks = count(left, false) + count(right, false);

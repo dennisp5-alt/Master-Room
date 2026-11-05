@@ -1357,13 +1357,14 @@ public final class MainActivity extends Activity {
                 };
                 final String meta = trackMeta(in);
                 float[] sourceBars = WaveView.measure(in, BARS);
-                Engineer.Session session = Engineer.prepare(in, target, asked, options, bar);
+                Audio[] holder = {in};
+                in = null;
+                Engineer.Session session = Engineer.prepare(holder, target, asked, options, bar);
                 final Listen before = session.before;
                 sourceFlatPeaks = session.sourceFlatPeaks;
                 main.post(() -> { setMeta(meta); measuredNow = before; ui(a -> a.showMeasured(before)); });
                 final List<Item> made = new ArrayList<>();
                 made.add(new Item("Source", before, sourceBars, null));
-                in = null;
                 List<Engineer.Result> results = new ArrayList<>();
                 for (Engineer.Recipe take : recipes) {
                     takeIndex[0]++;

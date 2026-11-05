@@ -1,5 +1,6 @@
 package com.dennis.masterroom.engine;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -76,10 +77,30 @@ public final class Engineer {
         public Target target;
         Eq.Moves moves;
         public final List<String> notes = new ArrayList<>();
-        Audio prepared;
+        private File prepared;
+        private int frames, rate;
         Listen preparedTone;
+        /** The shared work waits on storage, as each take needs it only at the start. */
+        void keep(Audio a) {
+            try {
+                prepared = File.createTempFile("prepared", ".raw");
+                prepared.deleteOnExit();
+                frames = a.frames();
+                rate = a.rate;
+                a.store(prepared);
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("Not enough free storage on this phone", e);
+            }
+        }
+        Audio load() {
+            try {
+                return Audio.load(prepared, frames, rate);
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("The working copy could not be read back", e);
+            }
+        }
         /** Frees the working copy once every take is rendered. */
-        public void release() { prepared = null; }
+        public void release() { if (prepared != null) prepared.delete(); prepared = null; }
     }
 
     public static final class Result {
@@ -111,6 +132,15 @@ public final class Engineer {
     }
 
     public static Session prepare(Audio in, Target target, double askedLufs, Options options, Progress p) {
+        return prepare(new Audio[]{in.copy()}, target, askedLufs, options, p);
+    }
+
+    /** Takes the song out of the holder and works on it directly, so long songs fit in memory. */
+    public static Session prepare(Audio[] holder, Target target, double askedLufs, Options options, Progress p) {
+        Audio in = holder[0];
+        holder[0] = null;
+        File[] stale = new File(System.getProperty("java.io.tmpdir", ".")).listFiles((d, n) -> n.startsWith("prepared") && n.endsWith(".raw"));
+        if (stale != null) for (File f : stale) f.delete();
         if (in.seconds() < 5) throw new IllegalArgumentException("That file is too short to master");
         Session s = new Session();
         s.target = target;
@@ -125,7 +155,9 @@ public final class Engineer {
         if (s.before.cutoffHz < 19000) s.notes.add(String.format(Locale.US, "Source stops near %.1f kHz, so nothing above that was boosted", s.before.cutoffHz / 1000));
 
         p.at("Checking for clicks and damage", 4);
-        Repair.Outcome fixed = Repair.apply(in);
+        int flat = Distortion.flatPeaks(in);
+        Repair.Outcome fixed = Repair.apply(in, true);
+        in = null;
         if (fixed.clicks + fixed.dropouts > 0 || fixed.startBurst) {
             s.notes.add(String.format(Locale.US, "Repairs: %d click%s, %d dropout%s%s", fixed.clicks, fixed.clicks == 1 ? "" : "s",
                     fixed.dropouts, fixed.dropouts == 1 ? "" : "s", fixed.startBurst ? ", burst removed before the song" : ""));
@@ -133,7 +165,6 @@ public final class Engineer {
             s.notes.add("Repairs: no clicks or dropouts found");
         }
 
-        int flat = Distortion.flatPeaks(in);
         if (flat > 0) s.notes.add("Source: " + flat + " flat-topped peaks already in the file. Mastering cannot undo these");
         s.sourceFlatPeaks = flat;
         double limit = target.reach() + 1.0;
@@ -162,11 +193,12 @@ public final class Engineer {
             if (Math.abs(miss[0]) < 0.3 && Math.abs(miss[1]) < 0.3 && Math.abs(miss[2]) < 0.3 && Math.abs(miss[3]) < 0.3) break;
             m.add(miss[0], miss[1], miss[2], miss[3], limit);
             p.at("Linear-phase EQ, checking the result", 11);
+            out = null;
             out = shape(clean, m, plan, lowCut, null, p);
             check = Listen.tone(out);
         }
         s.notes.add("Applied after checking the result: " + String.join(", ", m.describe()));
-        s.prepared = out;
+        s.keep(out);
         s.preparedTone = check;
         return s;
     }
@@ -185,9 +217,15 @@ public final class Engineer {
         FirFilter.Curve midCurve = hz -> Math.pow(10, m.midDb(hz) / 20) * high(hz, subsonic);
         FirFilter.Curve sideCurve = hz -> Math.pow(10, m.sideDb(hz) / 20) * high(hz, subsonic)
                 * (mono > 0 ? high(hz, mono) * 0.97 + 0.03 : 1);
-        mid = new FirFilter(midCurve, 16384, in.rate).apply(mid);
-        side = new FirFilter(sideCurve, 16384, in.rate).apply(side);
-        Sections.apply(mid, side, in.rate, plan);
+        if (plan.active()) {
+            mid = Sections.blend(new FirFilter(hz -> midCurve.linear(hz) * Math.pow(10, plan.quiet.midDb(hz) / 20), 16384, in.rate),
+                    new FirFilter(hz -> midCurve.linear(hz) * Math.pow(10, (plan.loud.midDb(hz) + Eq.bell(hz, 2500, 0.7, plan.vocalDb)) / 20), 16384, in.rate), mid, in.rate, plan);
+            side = Sections.blend(new FirFilter(hz -> sideCurve.linear(hz) * Math.pow(10, plan.quiet.midDb(hz) / 20), 16384, in.rate),
+                    new FirFilter(hz -> sideCurve.linear(hz) * Math.pow(10, plan.loud.midDb(hz) / 20), 16384, in.rate), side, in.rate, plan);
+        } else {
+            mid = new FirFilter(midCurve, 16384, in.rate).apply(mid);
+            side = new FirFilter(sideCurve, 16384, in.rate).apply(side);
+        }
 
         p.at("Taming harsh and boomy moments", 14);
         DynamicBand.Outcome harsh = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Harshness", 2500, 6000, 2.5, 0.6, 3.0, -22, true));
@@ -195,9 +233,13 @@ public final class Engineer {
         DynamicBand.Outcome low = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Low end", 0, 130, 3.0, 0.5, lowCut, -14, false));
         if (notes != null) notes.add(String.format(Locale.US, "Harshness: up to %.1f dB on %.1f%% of the song. Sibilance: up to %.1f dB on %.1f%%. Kick and bass peaks: up to %.1f dB on %.1f%%",
                 harsh.maxCutDb, harsh.activePercent, sib.maxCutDb, sib.activePercent, low.maxCutDb, low.activePercent));
-        Audio out = new Audio(in.frames(), in.rate);
-        for (int i = 0; i < mid.length; i++) { out.l[i] = mid[i] + side[i]; out.r[i] = mid[i] - side[i]; }
-        return out;
+        // Left and right take over the mid and side arrays, so no third copy is needed.
+        for (int i = 0; i < mid.length; i++) {
+            float centre = mid[i], edge = side[i];
+            mid[i] = centre + edge;
+            side[i] = centre - edge;
+        }
+        return new Audio(mid, side, in.rate);
     }
 
     private static double high(double hz, double fc) {
@@ -215,7 +257,7 @@ public final class Engineer {
         Result r = new Result();
         r.take = take; r.askedLufs = askedLufs;
         r.ceilingDb = ceilingFor(askedLufs);
-        Audio a = s.prepared.copy();
+        Audio a = s.load();
         r.stages.add(new Point("EQ and problem solving", a));
 
         p.at(take.label + ": riding sections", 20);
@@ -262,6 +304,7 @@ public final class Engineer {
 
         p.at(take.label + ": finding the level", 60);
         Audio pre = a;
+        a = null;
         double robust = robustPeak(pre);
         Loudness.Result preLoud = Loudness.measure(pre);
         Level level = search(pre, preLoud, askedLufs, r.ceilingDb, robust, take);
@@ -290,6 +333,7 @@ public final class Engineer {
         double lastGain = 0, lastGot = 0;
         for (int attempt = 0; attempt < 4; attempt++) {
             p.at(take.label + ": clipper and limiter", 70 + attempt * 6);
+            best = null;
             Rendered now = render(pre, preLoud, gain, robust, usedCeiling, take, true);
             double tp = Oversample.truePeakDb(now.audio);
             best = now;
@@ -301,7 +345,9 @@ public final class Engineer {
             lastGain = gain; lastGot = now.lufs;
             gain = Math.min(level.most, gain + Math.max(-2, Math.min(2, err / slope)));
         }
-        best = cleanUp(best, pre, beforeDensity, preLoud, gain, level.most, robust, usedCeiling, askedLufs, take, r, p);
+        Rendered[] held = {best};
+        best = null;
+        best = cleanUp(held, pre, beforeDensity, preLoud, gain, level.most, robust, usedCeiling, askedLufs, take, r, p);
         Audio master = best.audio;
         Repair.edges(master);
         double over = Oversample.truePeakDb(master) - r.ceilingDb;
@@ -379,26 +425,44 @@ public final class Engineer {
      * back at those moments and the limiter takes over. If that is not enough, the take
      * comes down a little in level, because a clean master matters more than the number.
      */
-    private static Rendered cleanUp(Rendered first, Audio pre, Audio reference, Loudness.Result preLoud, double startGain, double most, double robust, double ceiling,
+    private static Rendered cleanUp(Rendered[] held, Audio pre, Audio reference, Loudness.Result preLoud, double startGain, double most, double robust, double ceiling,
                                     double asked, Recipe take, Result r, Progress p) {
         p.at(take.label + ": checking for distortion", 88);
-        Rendered best = first;
+        Rendered best = held[0];
+        held[0] = null;
         double gain = startGain;
-        Distortion.Report report = Distortion.check(reference.gained(gain), best.audio);
+        Distortion.Report report = Distortion.check(reference, gain, best.audio);
         final int found = report.audible;
         float[] calm = null;
         for (int round = 0; round < 3 && !report.passed(); round++) {
             p.at(take.label + ": easing clipping", 90 + round * 2);
             calm = Distortion.calm(report, calm, pre.seconds());
             double tryGain = round == 0 ? gain : gain - 0.4;
+            // Round one always replaces the take. Later rounds might not, so it waits on storage.
+            Session saved = null;
+            if (round > 0) {
+                saved = new Session();
+                saved.keep(best.audio);
+                best.audio = null;
+            } else {
+                best = null;
+            }
             Rendered now = render(pre, preLoud, tryGain, robust, ceiling, take, true, calm);
             if (round == 0 && asked - now.lufs > 0.08) {
-                tryGain = Math.min(most, tryGain + Math.min(0.6, (asked - now.lufs) / 0.6));
+                double got = now.lufs;
+                now = null;
+                tryGain = Math.min(most, tryGain + Math.min(0.6, (asked - got) / 0.6));
                 now = render(pre, preLoud, tryGain, robust, ceiling, take, true, calm);
             }
-            Distortion.Report again = Distortion.check(reference.gained(tryGain), now.audio);
+            Distortion.Report again = Distortion.check(reference, tryGain, now.audio);
             // Giving up level is only worth it if it actually removes spots.
-            if (again.audible >= report.audible && round > 0) break;
+            if (again.audible >= report.audible && round > 0) {
+                now = null;
+                best.audio = saved.load();
+                saved.release();
+                break;
+            }
+            if (saved != null) saved.release();
             best = now;
             gain = tryGain;
             report = again;

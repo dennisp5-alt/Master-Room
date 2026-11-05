@@ -182,12 +182,12 @@ public final class EngineChecks {
             ringing.l[i] = ringing.r[i] = (float) (sig + (on ? 0.25 * Math.sin(2 * Math.PI * 2500 * i / r48) : 0));
         }
         CleanUp.Outcome quietOut = new CleanUp.Outcome(), ringOut = new CleanUp.Outcome();
-        Audio cleaned = CleanUp.apply(steady, quietOut);
+        Audio cleaned = CleanUp.apply(steady.copy(), quietOut);
         double e = 0, er = 0;
         for (int i = r48; i < sec * r48 - r48; i++) { double d = cleaned.l[i] - steady.l[i]; e += d * d; er += steady.l[i] * steady.l[i]; }
         double nullDb = 10 * Math.log10(Math.max(1e-20, e) / er);
         check("Clean-up leaves steady music alone", nullDb < -30, String.format(Locale.US, "difference %.1f dB", nullDb));
-        Audio rung = CleanUp.apply(ringing, ringOut);
+        Audio rung = CleanUp.apply(ringing.copy(), ringOut);
         check("Clean-up catches a ringing resonance", ringOut.resonanceMaxDb > 1.5, String.format(Locale.US, "cut %.1f dB, active %.0f%%", ringOut.resonanceMaxDb, ringOut.resonancePercent));
         check("Clean-up keeps the length", rung.frames() == ringing.frames(), "");
 

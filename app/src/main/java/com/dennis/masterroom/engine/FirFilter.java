@@ -39,6 +39,40 @@ final class FirFilter {
         fft.forward(hr, hi);
     }
 
+    /** Receives two filters' outputs for each sample, in order. */
+    interface Sink { void take(int index, double first, double second); }
+
+    /**
+     * Runs this and another filter of the same size over x, without holding either result.
+     * One complex transform carries both, because each filter's output is real.
+     */
+    void stream(FirFilter other, float[] x, Sink sink) {
+        if (other.nfft != nfft || other.len != len) throw new IllegalArgumentException("filters differ in size");
+        double[] br = new double[nfft], bi = new double[nfft];
+        for (int k = 0; k < nfft; k++) { br[k] = hr[k] - other.hi[k]; bi[k] = hi[k] + other.hr[k]; }
+        int d = (len - 1) / 2;
+        double[] re = new double[nfft], im = new double[nfft];
+        for (long s = -d; s - d + len - 1 < x.length + (long) hop; s += hop) {
+            Engineer.checkStop();
+            java.util.Arrays.fill(im, 0);
+            for (int i = 0; i < nfft; i++) {
+                long p = s + i;
+                re[i] = p >= 0 && p < x.length ? x[(int) p] : 0;
+            }
+            fft.forward(re, im);
+            for (int k = 0; k < nfft; k++) {
+                double a = re[k] * br[k] - im[k] * bi[k];
+                im[k] = re[k] * bi[k] + im[k] * br[k];
+                re[k] = a;
+            }
+            fft.inverse(re, im);
+            for (int j = len - 1; j < nfft; j++) {
+                long idx = s + j - d;
+                if (idx >= 0 && idx < x.length) sink.take((int) idx, re[j], im[j]);
+            }
+        }
+    }
+
     /** Same length as the input, no delay. */
     float[] apply(float[] x) {
         float[] out = new float[x.length];

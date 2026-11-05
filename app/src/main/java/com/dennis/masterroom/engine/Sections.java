@@ -118,21 +118,15 @@ final class Sections {
         return out;
     }
 
-    /** Mid and side, each as a blend of the quiet and big versions. */
-    static void apply(float[] mid, float[] side, int rate, Plan p) {
-        if (!p.active()) return;
-        float[] midQuiet = filter(mid, p.quiet, 0, rate), midBig = filter(mid, p.loud, p.vocalDb, rate);
-        float[] sideQuiet = filter(side, p.quiet, 0, rate), sideBig = filter(side, p.loud, 0, rate);
-        int step = rate / 100;
-        for (int i = 0; i < mid.length; i++) {
-            int at = i / step;
-            float mix = p.big[Math.min(p.big.length - 1, at)];
-            mid[i] = midQuiet[i] + (midBig[i] - midQuiet[i]) * mix;
-            side[i] = sideQuiet[i] + (sideBig[i] - sideQuiet[i]) * mix;
-        }
-    }
-
-    private static float[] filter(float[] x, Eq.Moves m, double vocalDb, int rate) {
-        return new FirFilter(hz -> Math.pow(10, (m.midDb(hz) + Eq.bell(hz, 2500, 0.7, vocalDb)) / 20), 8192, rate).apply(x);
+    /** One channel through its quiet and big filters at once, blended as the song moves. */
+    static float[] blend(FirFilter quiet, FirFilter big, float[] x, int rate, Plan p) {
+        float[] out = new float[x.length];
+        final int step = rate / 100;
+        final float[] map = p.big;
+        quiet.stream(big, x, (i, a, b) -> {
+            float mix = map[Math.min(map.length - 1, i / step)];
+            out[i] = (float) (a + (b - a) * mix);
+        });
+        return out;
     }
 }

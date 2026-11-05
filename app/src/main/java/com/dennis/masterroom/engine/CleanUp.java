@@ -22,10 +22,15 @@ final class CleanUp {
 
     private CleanUp() {}
 
+    /** Works in place, so a long song needs no second copy of itself. */
     static Audio apply(Audio in, Outcome out) {
         int n = in.frames(), rate = in.rate;
-        float[] mid = new float[n], side = new float[n];
-        for (int i = 0; i < n; i++) { mid[i] = (in.l[i] + in.r[i]) * 0.5f; side[i] = (in.l[i] - in.r[i]) * 0.5f; }
+        float[] mid = in.l, side = in.r;
+        for (int i = 0; i < n; i++) {
+            float l = mid[i], r = side[i];
+            mid[i] = (l + r) * 0.5f;
+            side[i] = (l - r) * 0.5f;
+        }
         int size = rate > 60000 ? 4096 : 2048, hop = size / 4, frames = (n + size) / hop + 1;
         double[] window = new double[size];
         for (int i = 0; i < size; i++) window[i] = Math.sin(Math.PI * (i + 0.5) / size);
@@ -43,7 +48,7 @@ final class CleanUp {
 
         float[][] cut = resonance(mid, side, window, fft, frames, hop, rate, from, to, centre, out);
         double[] gainDb = new double[size / 2 + 1];
-        float[] outMid = new float[n], outSide = new float[n];
+        float[] outMid = new float[size], outSide = new float[size];
 
         int first = (int) Math.ceil(SWIRL_FROM_HZ / hz), last = Math.min(size / 2 - 2, (int) Math.floor(Math.min(SWIRL_TO_HZ, rate * 0.45) / hz));
         double[][] re = new double[SPAN][size], im = new double[SPAN][size];
@@ -93,13 +98,26 @@ final class CleanUp {
                     swirlMax = Math.max(swirlMax, c);
                 }
             }
-            write(re[at], im[at], gainDb, window, fft, now * hop - size, outMid, outSide);
+            write(re[at], im[at], gainDb, window, fft, outMid, outSide);
+            // These samples are finished, and no frame still to come will read them.
+            int start = now * hop - size;
+            for (int i = 0; i < hop; i++) {
+                int p = start + i;
+                if (p >= 0 && p < n) { mid[p] = outMid[i]; side[p] = outSide[i]; }
+            }
+            System.arraycopy(outMid, hop, outMid, 0, size - hop);
+            System.arraycopy(outSide, hop, outSide, 0, size - hop);
+            Arrays.fill(outMid, size - hop, size, 0);
+            Arrays.fill(outSide, size - hop, size, 0);
         }
         out.swirlMaxDb = swirlMax;
         out.swirlPercent = 100.0 * swirlFrames / Math.max(1, loudFrames);
-        Audio done = new Audio(n, rate);
-        for (int i = 0; i < n; i++) { done.l[i] = outMid[i] + outSide[i]; done.r[i] = outMid[i] - outSide[i]; }
-        return done;
+        for (int i = 0; i < n; i++) {
+            float m = mid[i], d = side[i];
+            mid[i] = m + d;
+            side[i] = m - d;
+        }
+        return in;
     }
 
     private static void load(float[] mid, float[] side, double[] window, int start, double[] re, double[] im) {
@@ -214,7 +232,7 @@ final class CleanUp {
         }
     }
 
-    private static void write(double[] re, double[] im, double[] gainDb, double[] window, Fft fft, int start, float[] mid, float[] side) {
+    private static void write(double[] re, double[] im, double[] gainDb, double[] window, Fft fft, float[] mid, float[] side) {
         int size = window.length;
         double[] a = re.clone(), b = im.clone();
         for (int k = 1; k < size / 2; k++) {
@@ -225,10 +243,8 @@ final class CleanUp {
         }
         fft.inverse(a, b);
         for (int i = 0; i < size; i++) {
-            int p = start + i;
-            if (p < 0 || p >= mid.length) continue;
-            mid[p] += (float) (a[i] * window[i] * 0.5);
-            side[p] += (float) (b[i] * window[i] * 0.5);
+            mid[i] += (float) (a[i] * window[i] * 0.5);
+            side[i] += (float) (b[i] * window[i] * 0.5);
         }
     }
 }

@@ -16,33 +16,38 @@ final class Density {
     static Audio apply(Audio in, double mostDb) {
         FirFilter lows = new FirFilter(hz -> 1 / Math.sqrt(1 + Math.pow(hz / 150, 4)), 8192, in.rate);
         FirFilter highs = new FirFilter(hz -> 1 / Math.sqrt(1 + Math.pow(3000 / Math.max(1, hz), 4)), 8192, in.rate);
-        Audio low = new Audio(lows.apply(in.l), lows.apply(in.r), in.rate);
-        Audio high = new Audio(highs.apply(in.l), highs.apply(in.r), in.rate);
-        int n = in.frames();
-        Audio mid = new Audio(n, in.rate);
-        for (int i = 0; i < n; i++) {
-            mid.l[i] = in.l[i] - low.l[i] - high.l[i];
-            mid.r[i] = in.r[i] - low.r[i] - high.r[i];
+        final int step = Math.max(1, in.rate / 1000), blocks = in.frames() / step + 2;
+        final double[][] level = new double[3][blocks];
+        for (float[] channel : new float[][]{in.l, in.r}) {
+            final float[] x = channel;
+            lows.stream(highs, x, (i, low, high) -> {
+                int b = i / step;
+                level[0][b] = Math.max(level[0][b], Math.abs(low));
+                level[1][b] = Math.max(level[1][b], Math.abs(x[i] - low - high));
+                level[2][b] = Math.max(level[2][b], Math.abs(high));
+            });
         }
-        ease(low, mostDb); ease(mid, mostDb); ease(high, mostDb * 0.6);
-        Audio out = new Audio(n, in.rate);
-        for (int i = 0; i < n; i++) {
-            out.l[i] = low.l[i] + mid.l[i] + high.l[i];
-            out.r[i] = low.r[i] + mid.r[i] + high.r[i];
-        }
+        final float[][] gain = {gains(level[0], mostDb), gains(level[1], mostDb), gains(level[2], mostDb * 0.6)};
+        return new Audio(ease(lows, highs, in.l, gain, step), ease(lows, highs, in.r, gain, step), in.rate);
+    }
+
+    private static float[] ease(FirFilter lows, FirFilter highs, float[] x, float[][] gain, int step) {
+        float[] out = new float[x.length];
+        final float[] a = gain[0], b = gain[1], c = gain[2];
+        lows.stream(highs, x, (i, low, high) -> {
+            int at = i / step;
+            float f = (float) (i % step) / step;
+            float ga = a[at] + (a[at + 1] - a[at]) * f, gb = b[at] + (b[at + 1] - b[at]) * f, gc = c[at] + (c[at + 1] - c[at]) * f;
+            out[i] = (float) (low * ga + (x[i] - low - high) * gb + high * gc);
+        });
         return out;
     }
 
-    private static void ease(Audio band, double mostDb) {
+    /** Linear gain every millisecond for one band. */
+    private static float[] gains(double[] level, double mostDb) {
         Engineer.checkStop();
-        int step = Math.max(1, band.rate / 1000), blocks = band.frames() / step + 2, n = band.frames();
-        double[] level = new double[blocks];
-        for (int i = 0; i < n; i++) {
-            double m = Math.max(Math.abs(band.l[i]), Math.abs(band.r[i]));
-            if (m > level[i / step]) level[i / step] = m;
-        }
+        int blocks = level.length, hold = 5;
         double[] loudness = new double[blocks];
-        int hold = 5;
         for (int b = 0; b < blocks; b++) {
             double m = 0;
             for (int j = Math.max(0, b - hold); j <= Math.min(blocks - 1, b + hold); j++) m = Math.max(m, level[j]);
@@ -57,11 +62,8 @@ final class Density {
         for (int b = 0; b < blocks; b++) { y = Math.max(cut[b], a * y + (1 - a) * cut[b]); cut[b] = y; }
         y = 0;
         for (int b = blocks - 1; b >= 0; b--) { y = a * y + (1 - a) * cut[b]; cut[b] = y; }
-        for (int i = 0; i < n; i++) {
-            int b = i / step;
-            double f = (double) (i % step) / step;
-            float g = (float) Math.pow(10, -(cut[b] + (cut[b + 1] - cut[b]) * f) / 20);
-            band.l[i] *= g; band.r[i] *= g;
-        }
+        float[] out = new float[blocks];
+        for (int b = 0; b < blocks; b++) out[b] = (float) Math.pow(10, -cut[b] / 20);
+        return out;
     }
 }

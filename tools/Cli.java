@@ -6,14 +6,14 @@ import java.util.*;
 public final class Cli {
     public static void main(String[] a) throws Exception {
         long t0 = System.nanoTime();
-        Audio in = Wav.read(new File(a[0]));
+        Audio[] hand = {Wav.read(new File(a[0]))};
         File dir = new File(a[1]); dir.mkdirs();
         double lufs = Double.parseDouble(a[2]);
         Target.Style style = a.length > 3 ? Target.Style.valueOf(a[3]) : Target.Style.COUNTRY;
         Engineer.Progress p = (s, n) -> {};
         Engineer.Options o = new Engineer.Options();
         o.cleanUp = System.getProperty("cleanup") == null;
-        Engineer.Session s = Engineer.prepare(in, Target.builtIn(style, System.getProperty("commercial") != null), lufs, o, p);
+        Engineer.Session s = Engineer.prepare(hand, Target.builtIn(style, System.getProperty("commercial") != null), lufs, o, p);
         System.out.printf(Locale.US, "IN %.2f LUFS LRA %.1f TP %.2f crest %.1f cutoff %.0f lowSide %.1f%n",
                 s.before.loudness.integrated, s.before.loudness.lra, s.before.truePeakDb, s.before.crestDb, s.before.cutoffHz, s.before.lowSideDb);
         for (String n : s.notes) System.out.println("  " + n);

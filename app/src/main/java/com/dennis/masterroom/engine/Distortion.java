@@ -33,7 +33,7 @@ public final class Distortion {
 
     private Distortion() {}
 
-    private static double[] score(float[] before, float[] after, int rate) {
+    private static double[] score(float[] before, float level, float[] after, int rate) {
         int n = Math.min(before.length, after.length), blocks = n < SIZE ? 0 : (n - SIZE) / HOP + 1;
         double[] out = new double[blocks];
         Fft fft = new Fft(SIZE);
@@ -51,14 +51,14 @@ public final class Distortion {
             int at = s * HOP;
             double xy = 0, xx = 0;
             for (int i = 0; i < SIZE; i++) {
-                double x = before[at + i] * w[i], y = after[at + i] * w[i];
+                double x = before[at + i] * level * w[i], y = after[at + i] * w[i];
                 xy += x * y; xx += x * x;
             }
             out[s] = -200;
             if (xx < 1e-9) continue;
             double g = xy / xx;
             for (int i = 0; i < SIZE; i++) {
-                double x = before[at + i] * w[i], y = after[at + i] * w[i];
+                double x = before[at + i] * level * w[i], y = after[at + i] * w[i];
                 re[i] = x * g;
                 im[i] = y - x * g;
             }
@@ -93,8 +93,12 @@ public final class Distortion {
     }
 
     /** Compares the same audio before and after the loudness stage, frame for frame. */
-    public static Report check(Audio before, Audio after) {
-        double[] left = score(before.l, after.l, before.rate), right = score(before.r, after.r, before.rate);
+    public static Report check(Audio before, Audio after) { return check(before, 0, after); }
+
+    /** @param gainDb level change to allow for, so the audio need not be copied to apply it */
+    static Report check(Audio before, double gainDb, Audio after) {
+        float level = (float) Math.pow(10, gainDb / 20);
+        double[] left = score(before.l, level, after.l, before.rate), right = score(before.r, level, after.r, before.rate);
         Report r = new Report();
         int blocks = Math.min(left.length, right.length);
         double secs = (double) HOP / before.rate;
