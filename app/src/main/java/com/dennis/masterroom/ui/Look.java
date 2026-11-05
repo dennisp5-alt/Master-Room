@@ -49,8 +49,8 @@ final class Look {
     /** Solid surface colours become glass here, so every screen changes together. */
     private static int glassFill(int fill) {
         if (fill == WELL) return 0x5C06090E;
-        if (fill == RAISED) return 0x12FFFFFF;
-        if (fill == PANEL) return 0x0DFFFFFF;
+        if (fill == RAISED) return 0x0DFFFFFF;
+        if (fill == PANEL) return 0x08FFFFFF;
         if (fill == BG) return 0x52060A0E;
         return fill;
     }
@@ -71,9 +71,9 @@ final class Look {
 
     /** A clear glass panel: barely tinted, with a bright edge that catches the light. */
     static GradientDrawable metal(float radiusDp) {
-        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x1AFFFFFF, 0x0AFFFFFF, 0x0DFFFFFF});
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x12FFFFFF, 0x05FFFFFF, 0x07FFFFFF});
         d.setCornerRadius(dp(radiusDp));
-        d.setStroke(Math.max(1, dp(1)), 0x52FFFFFF);
+        d.setStroke(Math.max(1, dp(1)), 0x47FFFFFF);
         return d;
     }
 

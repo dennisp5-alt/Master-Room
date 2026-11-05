@@ -171,7 +171,9 @@ public final class MainActivity extends Activity {
         parts = new Parts(this);
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Look.BG);
-        root.addView(new GlassBackdrop(this), new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        GlassBackdrop backdrop = new GlassBackdrop(this);
+        backdrop.setSource(this::lightsNow);
+        root.addView(backdrop, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         sessionScreen = buildSession();
         compareScreen = buildCompare();
         compareScreen.setVisibility(View.GONE);
@@ -582,6 +584,32 @@ public final class MainActivity extends Activity {
 
     private void refreshCeiling() {
         ceilingLine.setText(String.format(Locale.US, "Target %.1f LUFS, true peak ceiling %.1f dBTP", level, Engineer.ceilingFor(level)));
+    }
+
+    private final float[] lightBars = new float[Spectrum.BARS];
+
+    /** Lows, mids and highs for the lights behind the glass, from whatever is playing. */
+    private boolean lightsNow(float[] three) {
+        if (player.barsNow(lightBars)) {
+            int third = lightBars.length / 3;
+            for (int band = 0; band < 3; band++) {
+                float most = 0;
+                for (int i = band * third; i < Math.min(lightBars.length, (band + 1) * third); i++) most = Math.max(most, lightBars[i]);
+                three[band] = most;
+            }
+            return true;
+        }
+        android.media.MediaPlayer mp = songPlayer;
+        float[] levels = songLevels;
+        if (mp == null || levels == null || levels.length == 0) return false;
+        int at = safePosition(mp) / 50;
+        float now = levels[Math.min(levels.length - 1, Math.max(0, at))], before = levels[Math.min(levels.length - 1, Math.max(0, at - 4))];
+        float level = Math.max(0, Math.min(1, (now + 26) / 18));
+        // A file playing here gives one level, so its rises drive the top two lights.
+        three[0] = level;
+        three[1] = level * 0.8f;
+        three[2] = Math.max(0, Math.min(1, (now - before) / 6 + 0.25f));
+        return true;
     }
 
     /** The source plays here, with the Light Arc following its real level. */
