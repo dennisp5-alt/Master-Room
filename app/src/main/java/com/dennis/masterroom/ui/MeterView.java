@@ -69,7 +69,7 @@ final class MeterView extends View {
         c.scale(s, s);
         p.setStyle(Paint.Style.FILL);
         p.setShader(null);
-        p.setColor(0xFF07090D);
+        p.setColor(0x24000000);
         c.drawRoundRect(full, 8, 8, p);
 
         p.setStyle(Paint.Style.STROKE);

@@ -113,7 +113,10 @@ public final class MainActivity extends Activity {
     private NeonView neon;
     private Button songPlay;
     private ToneView tone;
-    private final View[] leds = new View[STAGES.length];
+    private final View[] leds = new View[STAGES.length], modules = new View[STAGES.length];
+    private static final int[] STAGE_COLOURS = {0xFFFFB83D, 0xFF2EE6D6, 0xFF27E36B, 0xFFFF5FA2, 0xFFFF5A36, 0xFF9B6BFF};
+    private boolean flashOn = true;
+    private int flashTick;
 
     private TextView albumLine, tasteLine, previewNote;
     private int routeTick;
@@ -168,6 +171,7 @@ public final class MainActivity extends Activity {
         parts = new Parts(this);
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Look.BG);
+        root.addView(new GlassBackdrop(this), new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         sessionScreen = buildSession();
         compareScreen = buildCompare();
         compareScreen.setVisibility(View.GONE);
@@ -177,7 +181,7 @@ public final class MainActivity extends Activity {
         dock = new LinearLayout(this);
         dock.setOrientation(LinearLayout.VERTICAL);
         dock.setPadding(Look.dp(15), Look.dp(6), Look.dp(15), Look.dp(12));
-        dock.setBackgroundColor(Look.BG);
+        dock.setBackgroundColor(0xF20B0E13);
         dock.addView(statusLine, Parts.line(Parts.WRAP, 0));
         dock.addView(progress, Parts.line(Parts.WRAP, 4));
         // Always one tap back to finished takes, wherever you have ended up.
@@ -246,7 +250,7 @@ public final class MainActivity extends Activity {
 
     private ScrollView screen() {
         ScrollView s = new ScrollView(this);
-        s.setBackgroundColor(Look.BG);
+        s.setBackgroundColor(0);
         s.setFillViewport(true);
         column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
@@ -415,13 +419,14 @@ public final class MainActivity extends Activity {
             module.setGravity(Gravity.CENTER);
             module.setBackground(Look.shape(Look.WELL, Look.HAIR, 7));
             module.setPadding(0, Look.dp(4), 0, Look.dp(3));
+            modules[i] = module;
             SignalIconView icon = new SignalIconView(this, i);
             module.addView(icon, new LinearLayout.LayoutParams(Parts.MATCH, Look.dp(24)));
             LinearLayout moduleFoot = parts.row();
             moduleFoot.setGravity(Gravity.CENTER);
             View led = new View(this);
             leds[i] = led;
-            LinearLayout.LayoutParams dot = new LinearLayout.LayoutParams(Look.dp(5), Look.dp(5));
+            LinearLayout.LayoutParams dot = new LinearLayout.LayoutParams(Look.dp(8), Look.dp(8));
             dot.rightMargin = Look.dp(3);
             moduleFoot.addView(led, dot);
             TextView shortName = parts.text(STAGES[i], Look.label, 11, Look.MID);
@@ -687,10 +692,13 @@ public final class MainActivity extends Activity {
     }
 
     /** Each LED shows only what has really run: off, done, or running now. */
+    /** The stage at work flashes in its own colour. A finished stage stays lit. */
     private void lightPath(int running) {
         for (int i = 0; i < leds.length; i++) {
-            int color = i == running ? Look.GOLD_HI : stageDone[i] ? Look.AMBER_DIM : Look.LINE;
-            leds[i].setBackground(Look.shape(color, 0, 5));
+            int colour = STAGE_COLOURS[i];
+            boolean lit = i == running ? flashOn : stageDone[i];
+            leds[i].setBackground(Look.shape(lit ? colour : colour & 0x00FFFFFF | 0x38000000, 0, 5));
+            modules[i].setBackground(Look.shape(lit ? colour & 0x00FFFFFF | 0x33000000 : Look.WELL, lit ? colour : Look.HAIR, 7));
         }
     }
 
@@ -1271,6 +1279,11 @@ public final class MainActivity extends Activity {
 
     private void tick() {
         if (current != this) return;
+        if (runningStage >= 0 && ++flashTick >= 2) {
+            flashTick = 0;
+            flashOn = !flashOn;
+            lightPath(runningStage);
+        }
         if (compareScreen.getVisibility() == View.VISIBLE && player.size() > 0) {
             double f = player.fraction(), total = length();
             if (player.isPlaying()) wave.setFraction(f);
@@ -1593,8 +1606,8 @@ public final class MainActivity extends Activity {
     private static void markStageQuiet(String step) {
         if (step.contains("riding")) for (int i = 2; i < stageDone.length; i++) stageDone[i] = false;
         int stage = stageOf(step);
-        stageDone[stage] = true;
-        if (stage == 5) stageDone[4] = true;
+        // Reaching a stage means everything before it is finished, even one this take skips.
+        for (int i = 0; i <= stage; i++) stageDone[i] = true;
         runningStage = stage;
     }
 

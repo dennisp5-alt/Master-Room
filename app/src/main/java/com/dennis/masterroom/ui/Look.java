@@ -46,19 +46,34 @@ final class Look {
 
     static int dp(float v) { return Math.round(v * density); }
 
+    /** Solid surface colours become glass here, so every screen changes together. */
+    private static int glassFill(int fill) {
+        if (fill == WELL) return 0x5C06090E;
+        if (fill == RAISED) return 0x12FFFFFF;
+        if (fill == PANEL) return 0x0DFFFFFF;
+        if (fill == BG) return 0x52060A0E;
+        return fill;
+    }
+
+    private static int glassEdge(int stroke) {
+        if (stroke == LINE) return 0x47FFFFFF;
+        if (stroke == HAIR) return 0x2EFFFFFF;
+        return stroke;
+    }
+
     static GradientDrawable shape(int fill, int stroke, float radiusDp) {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(fill);
+        d.setColor(glassFill(fill));
         d.setCornerRadius(dp(radiusDp));
-        if (stroke != 0) d.setStroke(Math.max(1, dp(1)), stroke);
+        if (stroke != 0) d.setStroke(Math.max(1, dp(1)), glassEdge(stroke));
         return d;
     }
 
-    /** A brushed-metal rack surface: a slight top-to-bottom fall with a fine edge. */
+    /** A clear glass panel: barely tinted, with a bright edge that catches the light. */
     static GradientDrawable metal(float radiusDp) {
-        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{PANEL_TOP, 0xFF1B2029, PANEL});
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x1AFFFFFF, 0x0AFFFFFF, 0x0DFFFFFF});
         d.setCornerRadius(dp(radiusDp));
-        d.setStroke(Math.max(1, dp(1)), LINE);
+        d.setStroke(Math.max(1, dp(1)), 0x52FFFFFF);
         return d;
     }
 
