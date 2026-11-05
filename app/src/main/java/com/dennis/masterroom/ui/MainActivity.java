@@ -461,6 +461,7 @@ public final class MainActivity extends Activity {
         for (final Target.Style pick : Target.Style.values()) {
             String family = familyStarting(pick);
             if (family != null) {
+                fillRow(r, inRow);
                 TextView heading = parts.text(family, Look.label, 11, Look.DIM);
                 heading.setLetterSpacing(0.08f);
                 heading.setPadding(Look.dp(3), Look.dp(family.equals("COUNTRY AND ROOTS") ? 2 : 8), 0, Look.dp(3));
@@ -489,10 +490,16 @@ public final class MainActivity extends Activity {
             r.addView(b, size);
             inRow++;
         }
-        // Keeps a short last row from stretching across the screen.
-        for (; inRow > 0 && inRow < 3; inRow++) {
-            View spare = new View(this);
-            r.addView(spare, Parts.share(Look.dp(40), 1, 6));
+        fillRow(r, inRow);
+    }
+
+    /** Keeps a short last row from stretching across the screen. */
+    private void fillRow(LinearLayout row, int used) {
+        if (row == null || used == 0) return;
+        for (int i = used; i < 3; i++) {
+            LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, Look.dp(40), 1);
+            size.setMargins(Look.dp(3), 0, Look.dp(3), 0);
+            row.addView(new View(this), size);
         }
     }
 
