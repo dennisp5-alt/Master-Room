@@ -230,6 +230,19 @@ public final class EngineChecks {
         check("Streaming check runs MP3 both ways", sr.lines.size() >= 2 && Math.abs(sr.lines.get(0).lufsChange) < 0.5,
                 sr.lines.isEmpty() ? "no result" : String.format(Locale.US, "%s, level change %.2f", sr.verdict(), sr.lines.get(0).lufsChange));
 
+        // Lights: the bars and meter follow the real audio.
+        float[] tone1k = new float[4096], lit = new float[Spectrum.BARS];
+        for (int i = 0; i < 2048; i++) tone1k[2 * i] = tone1k[2 * i + 1] = (float) (0.3 * Math.sin(2 * Math.PI * 1000 * i / 48000));
+        new Spectrum(48000).bars(tone1k, lit);
+        int brightest = 0;
+        for (int i = 0; i < lit.length; i++) if (lit[i] > lit[brightest]) brightest = i;
+        double brightHz = 45 * Math.pow(16000 / 45.0, (brightest + 0.5) / Spectrum.BARS);
+        check("EQ bars light up at the right pitch", brightHz > 800 && brightHz < 1250, String.format(Locale.US, "brightest bar %.0f Hz", brightHz));
+        float[] fast = Spectrum.fastLevels(shaped, -14);
+        double fastMean = 0;
+        for (float v : fast) fastMean += v / fast.length;
+        check("Meter lights line up with the measured level", Math.abs(fastMean + 14) < 0.5, String.format(Locale.US, "average %.1f", fastMean));
+
         // Previews: playback-only curves do what their names say.
         check("Phone preview loses deep bass", previewDb(Preview.Mode.PHONE, 60) < previewDb(Preview.Mode.PHONE, 1000) - 20, String.format(Locale.US, "60 Hz %.1f dB, 1 kHz %.1f dB", previewDb(Preview.Mode.PHONE, 60), previewDb(Preview.Mode.PHONE, 1000)));
         check("Phone preview keeps upper bass and top end", previewDb(Preview.Mode.PHONE, 250) > previewDb(Preview.Mode.PHONE, 1000) - 2 && previewDb(Preview.Mode.PHONE, 12000) > previewDb(Preview.Mode.PHONE, 1000) - 2,

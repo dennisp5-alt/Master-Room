@@ -40,6 +40,7 @@ import com.dennis.masterroom.engine.Engineer;
 import com.dennis.masterroom.engine.Listen;
 import com.dennis.masterroom.engine.Preview;
 import com.dennis.masterroom.engine.Release;
+import com.dennis.masterroom.engine.Spectrum;
 import com.dennis.masterroom.engine.Streaming;
 import com.dennis.masterroom.engine.Target;
 import com.dennis.masterroom.engine.Taste;
@@ -109,6 +110,8 @@ public final class MainActivity extends Activity {
     private ProgressBar progress;
     private MeterView meter;
     private WaveView wave;
+    private NeonView neon;
+    private Button songPlay;
     private ToneView tone;
     private final View[] leds = new View[STAGES.length];
 
@@ -141,6 +144,9 @@ public final class MainActivity extends Activity {
     private static double refPunch = Double.NaN, refWidth = Double.NaN, refLow = Double.NaN;
     private static Preview.Mode previewMode = Preview.Mode.FULL;
     private static volatile int measureToken;
+    private static android.media.MediaPlayer songPlayer;
+    private static float[] songLevels;
+    private static int songRate = 48000;
     private static int sourceFlatPeaks;
 
     /** Runs on the screen that is showing now, if there is one. */
@@ -221,7 +227,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         if (current == this) current = null;
-        if (isFinishing() && !working) player.pause();
+        if (isFinishing() && !working) { player.pause(); stopSong(); }
         super.onDestroy();
     }
 
@@ -232,6 +238,7 @@ public final class MainActivity extends Activity {
 
     /** Moving between screens leaves playback, the selected take and any render running. */
     private void showCompare(boolean on) {
+        if (on) stopSong();
         compareScreen.setVisibility(on ? View.VISIBLE : View.GONE);
         sessionScreen.setVisibility(on ? View.GONE : View.VISIBLE);
         dock.setVisibility(on ? View.GONE : View.VISIBLE);
@@ -328,6 +335,10 @@ public final class MainActivity extends Activity {
         measuredPeak = parts.readout(tiles, "TRUE PEAK", "dBTP", 5);
         measuredRange = parts.readout(tiles, "RANGE", "LU", 5);
         monitor.addView(tiles, Parts.line(Parts.WRAP, 7));
+        songPlay = parts.button("PLAY SONG", v -> toggleSong());
+        Look.type(songPlay, Look.label, 14, Look.AMBER);
+        songPlay.setVisibility(View.GONE);
+        monitor.addView(songPlay, Parts.line(Look.dp(48), 7));
 
         // Profile, reference records and target share one compact control rack.
         LinearLayout controls = parts.panel(8, column);
@@ -568,15 +579,78 @@ public final class MainActivity extends Activity {
         ceilingLine.setText(String.format(Locale.US, "Target %.1f LUFS, true peak ceiling %.1f dBTP", level, Engineer.ceilingFor(level)));
     }
 
+    /** The source plays here, with the Light Arc following its real level. */
+    private void toggleSong() {
+        if (songPlayer != null) { stopSong(); return; }
+        if (songUri == null || measuredNow == null) return;
+        player.pause();
+        try {
+            android.media.MediaPlayer mp = new android.media.MediaPlayer();
+            mp.setAudioAttributes(new android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build());
+            mp.setDataSource(this, songUri);
+            mp.setOnCompletionListener(x -> stopSong());
+            mp.setOnPreparedListener(x -> {
+                if (songPlayer == x) x.start();
+            });
+            mp.setOnErrorListener((x, a, b) -> { stopSong(); return true; });
+            songPlayer = mp;
+            mp.prepareAsync();
+            ui(MainActivity::followSong);
+        } catch (IOException | RuntimeException e) {
+            stopSong();
+        }
+    }
+
+    private void followSong() {
+        songPlay.setText("STOP SONG");
+        final double[] blocks = measuredNow.loudness.blocks;
+        final double blockMs = measuredNow.loudness.segmentFrames * 1000.0 / Math.max(1, songRate);
+        meter.setLive(new MeterView.Live() {
+            @Override public boolean on() { return songPlayer != null; }
+            @Override public float light() {
+                android.media.MediaPlayer mp = songPlayer;
+                float[] levels = songLevels;
+                if (mp == null || levels == null || levels.length == 0) return -24;
+                return levels[Math.min(levels.length - 1, Math.max(0, safePosition(mp) / 50))];
+            }
+            @Override public float lufs() {
+                android.media.MediaPlayer mp = songPlayer;
+                if (mp == null || blocks.length == 0) return Float.NaN;
+                return (float) blocks[Math.min(blocks.length - 1, (int) Math.max(0, safePosition(mp) / blockMs))];
+            }
+        });
+    }
+
+    private static int safePosition(android.media.MediaPlayer mp) {
+        try { return mp.getCurrentPosition(); } catch (IllegalStateException e) { return 0; }
+    }
+
+    private static void stopSong() {
+        android.media.MediaPlayer mp = songPlayer;
+        songPlayer = null;
+        if (mp != null) {
+            try { mp.release(); } catch (RuntimeException ignored) { }
+        }
+        ui(a -> {
+            a.songPlay.setText("PLAY SONG");
+            a.meter.setLive(null);
+        });
+    }
+
     private void showMeasured(Listen l) {
         meter.setMeasured(l.loudness.integrated);
+        songPlay.setVisibility(songUri != null ? View.VISIBLE : View.GONE);
+        if (songPlayer != null) followSong();
         measuredLufs.setText(String.format(Locale.US, "%.1f", l.loudness.integrated));
         measuredPeak.setText(String.format(Locale.US, "%.1f", l.truePeakDb));
         measuredRange.setText(String.format(Locale.US, "%.1f", l.loudness.lra));
     }
 
     private void clearMeasured() {
+        stopSong();
         meter.setMeasured(Double.NaN);
+        songPlay.setVisibility(View.GONE);
         measuredLufs.setText("--"); measuredPeak.setText("--"); measuredRange.setText("--");
     }
 
@@ -590,10 +664,14 @@ public final class MainActivity extends Activity {
                 Audio a = Decoder.open(app, uri);
                 final String meta = trackMeta(a);
                 Listen l = Listen.to(a);
+                final float[] levels = Spectrum.fastLevels(a, l.loudness.integrated);
+                final int rate = a.rate;
                 main.post(() -> {
                     if (token != measureToken) return;
                     setMeta(meta);
                     measuredNow = l;
+                    songLevels = levels;
+                    songRate = rate;
                     ui(x -> x.showMeasured(l));
                 });
             } catch (Throwable e) {
@@ -666,20 +744,26 @@ public final class MainActivity extends Activity {
         LinearLayout display = parts.panel(8, column);
         display.addView(parts.label("LISTENING ROOM"));
         LinearLayout tabs = parts.row();
-        waveTab = parts.segment("WAVE", true, Look.label, v -> showTone(false));
+        waveTab = parts.segment("LIGHTS", true, Look.label, v -> showTone(false));
         toneTab = parts.segment("TONE", false, Look.label, v -> showTone(true));
         tabs.addView(waveTab);
         tabs.addView(toneTab);
         display.addView(tabs, Parts.line(Look.dp(50), 9));
-        FrameLayout well = new FrameLayout(this);
+        LinearLayout well = new LinearLayout(this);
+        well.setOrientation(LinearLayout.VERTICAL);
         well.setPadding(Look.dp(8), Look.dp(8), Look.dp(8), Look.dp(6));
         well.setBackground(Look.shape(Look.WELL, Look.HAIR, 6));
-        wave = new WaveView(this);
-        wave.setSeek(player::seek);
-        well.addView(wave, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(185)));
+        FrameLayout top = new FrameLayout(this);
+        neon = new NeonView(this);
+        neon.setSource(player::barsNow);
+        top.addView(neon, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(190)));
         tone = new ToneView(this);
         tone.setVisibility(View.GONE);
-        well.addView(tone, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(185)));
+        top.addView(tone, new FrameLayout.LayoutParams(Parts.MATCH, Look.dp(190)));
+        well.addView(top, Parts.line(Parts.WRAP, 0));
+        wave = new WaveView(this);
+        wave.setSeek(player::seek);
+        well.addView(wave, Parts.line(Look.dp(64), 6));
         display.addView(well, Parts.line(Parts.WRAP, 8));
 
         LinearLayout now = parts.row();
@@ -918,7 +1002,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showTone(boolean on) {
-        wave.setVisibility(on ? View.GONE : View.VISIBLE);
+        neon.setVisibility(on ? View.GONE : View.VISIBLE);
         tone.setVisibility(on ? View.VISIBLE : View.GONE);
         Look.surface(waveTab, on ? Look.shape(Look.RAISED, Look.LINE, 5) : Look.gold(5));
         Look.surface(toneTab, on ? Look.gold(5) : Look.shape(Look.RAISED, Look.LINE, 5));
@@ -1139,6 +1223,7 @@ public final class MainActivity extends Activity {
         Look.enable(playButton, any);
 
         wave.setBars(!any ? null : hide ? items.get(0).bars : item.bars);
+        neon.setResting(Spectrum.resting(!any ? null : hide ? items.get(0).mid : item.mid));
         double[] source = targetMid == null || !any ? null : ToneView.againstTarget(items.get(0).mid, targetMid);
         double[] take = targetMid == null || !any || order.get(selected) == 0 || item.mid == null ? null : ToneView.againstTarget(item.mid, targetMid);
         tone.show(source, take, item == null ? "" : item.name, hide);
@@ -1205,7 +1290,10 @@ public final class MainActivity extends Activity {
     }
 
     private void togglePlay() {
-        if (player.isPlaying()) player.pause(); else player.play();
+        if (player.isPlaying()) { player.pause(); return; }
+        stopSong();
+        player.play();
+        neon.wake();
     }
 
     // Files -------------------------------------------------------------------
@@ -1337,6 +1425,7 @@ public final class MainActivity extends Activity {
     // Mastering ---------------------------------------------------------------
 
     private void master() {
+        stopSong();
         final double asked = level;
         final Target target = currentTarget();
         final Uri uri = songUri;

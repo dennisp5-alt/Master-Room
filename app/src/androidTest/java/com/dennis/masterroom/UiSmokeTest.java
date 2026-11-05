@@ -212,6 +212,16 @@ public class UiSmokeTest {
         shot("session_bottom");
         checkTargets();
 
+        // The main page can play the song, with the arc following it.
+        scroll(false);
+        tap("PLAY SONG");
+        SystemClock.sleep(2500);
+        assertNotNull("Song plays from the main page", find("STOP SONG"));
+        shot("session_song_playing");
+        tap("STOP SONG");
+        assertNotNull(find("PLAY SONG"));
+        scroll(true);
+
         // Stop: a wrong press can be stopped, and the song stays loaded and ready.
         tap("-12");
         tap("MASTER IT");
@@ -258,7 +268,7 @@ public class UiSmokeTest {
         assertTrue("Level match says how this take plays", hasText("Playing exactly as saved") || hasText("Playback trim on Warm"));
         tap("TONE");
         shot("compare_tone");
-        tap("WAVE");
+        tap("LIGHTS");
 
         tap("Play");
         SystemClock.sleep(2500);

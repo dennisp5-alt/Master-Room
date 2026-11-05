@@ -5,6 +5,7 @@ import android.media.AudioFormat;
 import android.media.AudioTrack;
 
 import com.dennis.masterroom.engine.Preview;
+import com.dennis.masterroom.engine.Spectrum;
 import com.dennis.masterroom.engine.Wav;
 
 import java.io.File;
@@ -39,6 +40,32 @@ final class AbPlayer {
     private volatile long position;
     private Thread thread;
     private AudioTrack track;
+
+    // Bars for what is being heard. Audio waits in the track's buffer before it reaches the
+    // speaker, so each set is kept with its place in the stream and shown when that plays.
+    private static final int KEPT = 64;
+    private final Object barsLock = new Object();
+    private final float[][] kept = new float[KEPT][Spectrum.BARS];
+    private final long[] keptAt = new long[KEPT];
+    private long sent;
+    private int keptCount;
+
+    /** Fills out for the moment being heard now. Returns false when nothing is playing. */
+    boolean barsNow(float[] out) {
+        AudioTrack t = track;
+        if (!playing || t == null) return false;
+        long head = t.getPlaybackHeadPosition() & 0xFFFFFFFFL;
+        synchronized (barsLock) {
+            for (int back = 1; back <= Math.min(keptCount, KEPT); back++) {
+                int i = (keptCount - back) % KEPT;
+                if (keptAt[i] <= head) {
+                    System.arraycopy(kept[i], 0, out, 0, out.length);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
     synchronized void add(Version v) throws IOException {
         if (!versions.isEmpty() && versions.get(0).header.rate != v.header.rate) {
@@ -156,6 +183,8 @@ final class AbPlayer {
         float[] al = new float[CHUNK], ar = new float[CHUNK], bl = new float[CHUNK], br = new float[CHUNK];
         float[] out = new float[CHUNK * 2];
         int heard = active;
+        Spectrum analysis = new Spectrum(get(0).header.rate);
+        float[] bars = new float[Spectrum.BARS];
         try {
             while (!closed) {
                 if (!playing) { Thread.sleep(25); continue; }
@@ -181,7 +210,15 @@ final class AbPlayer {
                 heard = want;
                 Preview p = preview;
                 if (p != null) p.process(out, CHUNK);
+                analysis.bars(out, bars);
+                synchronized (barsLock) {
+                    int i = keptCount % KEPT;
+                    System.arraycopy(bars, 0, kept[i], 0, bars.length);
+                    keptAt[i] = sent;
+                    keptCount++;
+                }
                 track.write(out, 0, CHUNK * 2, AudioTrack.WRITE_BLOCKING);
+                sent += CHUNK;
                 if (position == at) position = at + CHUNK;
                 if (!more) { position = 0; pause(); }
             }

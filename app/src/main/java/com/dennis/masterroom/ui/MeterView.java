@@ -2,147 +2,128 @@ package com.dennis.masterroom.ui;
 
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
-import android.graphics.Shader;
 import android.view.View;
 
 import java.util.Locale;
 
 /**
- * Compact precision monitor. Golden flag = selected loudness target; white needle = real
- * measured source LUFS. No measured needle or displayed loudness is ever fabricated.
+ * Light Arc monitor. The gold marker is the chosen target. The lights show the source's
+ * measured loudness, or follow the song's real level while it plays. Nothing here is
+ * ever invented: with nothing measured, the arc stays dark.
  */
 final class MeterView extends View {
-    private static final float W = 342f, H = 138f;
-    private static final float CX = 171f, CY = 142f, R = 105f, LOW = -24f, HIGH = -6f;
+    /** The song while it plays. */
+    interface Live {
+        boolean on();
+        /** Fast level for the lights. */
+        float light();
+        /** Momentary loudness for the number. */
+        float lufs();
+    }
+
+    private static final float W = 342f, H = 188f, CX = 171f, CY = 160f, R = 128f, LENGTH = 22f;
+    private static final float LOW = -24f, HIGH = -6f, FALL = 0.14f;
+    private static final int SEGMENTS = 33;
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final RectF full = new RectF(0, 0, W, H);
-    private final RectF arc = new RectF(CX - R, CY - R, CX + R, CY + R);
-    private final RectF glass = new RectF(4, 4, W - 4, 105);
-    private float target = -14, measured = Float.NaN;
+    private float target = -14, measured = Float.NaN, shown = LOW;
+    private Live live;
 
     MeterView(Context c) { super(c); describe(); }
     void setTarget(double lufs) { target = (float) lufs; describe(); invalidate(); }
     void setMeasured(double lufs) { measured = (float) lufs; describe(); invalidate(); }
+    void setLive(Live l) { live = l; invalidate(); }
+
     private void describe() {
         setContentDescription(String.format(Locale.US, "Target %.1f LUFS. ", target)
                 + (Float.isFinite(measured) ? String.format(Locale.US, "Measured source %.1f LUFS", measured)
                 : "Source not measured yet"));
     }
+
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
         int width = MeasureSpec.getSize(widthSpec);
         setMeasuredDimension(width, Math.round(width * H / W));
     }
-    private static float clamp(float n) { return Math.max(LOW, Math.min(HIGH, n)); }
-    private static double angle(float n) {
-        return Math.toRadians(-62 + (clamp(n) - LOW) / (HIGH - LOW) * 124);
+
+    private static double angle(float lufs) {
+        float at = (Math.max(LOW, Math.min(HIGH, lufs)) - LOW) / (HIGH - LOW);
+        return Math.toRadians(-82 + at * 164);
     }
-    private static float x(float n, float r) { return CX + r * (float) Math.sin(angle(n)); }
-    private static float y(float n, float r) { return CY - r * (float) Math.cos(angle(n)); }
-    private static float arcAngle(float n) { return -90 + (float) Math.toDegrees(angle(n)); }
+
+    private static int colour(float lufs) {
+        return lufs < -14 ? 0xFF27E36B : lufs < -10 ? 0xFFFFB83D : 0xFFFF3B30;
+    }
 
     @Override protected void onDraw(Canvas c) {
         float s = getWidth() / W;
+        boolean playing = live != null && live.on();
+        float wanted = playing ? live.light() : Float.isFinite(measured) ? measured : LOW - 1;
+        shown = wanted > shown ? wanted : shown + (wanted - shown) * FALL;
+        if (playing || Math.abs(wanted - shown) > 0.05f) postInvalidateOnAnimation();
+
         c.save();
         c.scale(s, s);
         p.setStyle(Paint.Style.FILL);
-        p.setShader(new LinearGradient(0, 0, 0, H,
-                new int[]{0xFF2C333E, 0xFF080B10, 0xFF171D26}, null, Shader.TileMode.CLAMP));
-        c.drawRoundRect(full, 8, 8, p);
         p.setShader(null);
-        p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(1.25f);
-        p.setColor(0xFF56515A);
+        p.setColor(0xFF07090D);
         c.drawRoundRect(full, 8, 8, p);
 
-        // Smoked glass, inset specular highlights and calibrated arced scale.
-        p.setStyle(Paint.Style.FILL);
-        p.setShader(new LinearGradient(0, 3, 0, 105,
-                new int[]{0xFF161D27, 0xFF0B1018, 0xFF04070A}, null, Shader.TileMode.CLAMP));
-        c.drawRoundRect(glass, 7, 7, p);
-        p.setShader(null);
         p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(1);
-        p.setColor(0xFF353D47);
-        c.drawRoundRect(glass, 7, 7, p);
-
         p.setStrokeCap(Paint.Cap.ROUND);
-        p.setStrokeWidth(2f);
-        p.setColor(0xFFBAAB8D);
-        c.drawArc(arc, arcAngle(LOW), arcAngle(-9) - arcAngle(LOW), false, p);
-        p.setStrokeWidth(3.5f);
-        p.setColor(0xFFCB6550);
-        c.drawArc(arc, arcAngle(-9), arcAngle(HIGH) - arcAngle(-9), false, p);
-
-        for (int n = (int) LOW; n <= (int) HIGH; n++) {
-            boolean major = (n % 4 == 0);
-            p.setColor(n >= -9 ? 0xFFE17960 : 0xFFCCC4B3);
-            p.setStrokeWidth(major ? 1.8f : 0.95f);
-            float length = major ? 10f : n % 2 == 0 ? 7f : 4f;
-            c.drawLine(x(n, R), y(n, R), x(n, R + length), y(n, R + length), p);
+        for (int i = 0; i < SEGMENTS; i++) {
+            float lufs = LOW + (HIGH - LOW) * i / (SEGMENTS - 1);
+            double a = angle(lufs);
+            float sin = (float) Math.sin(a), cos = (float) Math.cos(a);
+            float x1 = CX + R * sin, y1 = CY - R * cos, x2 = CX + (R - LENGTH) * sin, y2 = CY - (R - LENGTH) * cos;
+            boolean lit = lufs <= shown;
+            int colour = colour(lufs);
+            if (lit) {
+                p.setColor(colour & 0x00FFFFFF | 0x55000000);
+                p.setStrokeWidth(13);
+                c.drawLine(x1, y1, x2, y2, p);
+            }
+            p.setColor(lit ? colour : colour & 0x00FFFFFF | 0x26000000);
+            p.setStrokeWidth(7);
+            c.drawLine(x1, y1, x2, y2, p);
         }
 
-        p.setStyle(Paint.Style.FILL);
-        p.setTypeface(Look.label);
-        p.setTextSize(13);
-        p.setTextAlign(Paint.Align.CENTER);
-        p.setColor(0xFFF1E8D8);
-        for (int n : new int[]{-24, -20, -16, -12, -8}) {
-            c.drawText(String.valueOf(n), x(n, R + 20), y(n, R + 20) + 4, p);
-        }
-
-        // Selectable target: one short triangular marker. It does not impersonate a reading.
-        float ax = x(target, R - 3), ay = y(target, R - 3);
-        float bx = x(target, R - 17), by = y(target, R - 17);
-        float dx = (ay - by) * 0.40f, dy = (bx - ax) * 0.40f;
+        // The chosen target, outside the lights so it never reads as a measurement.
+        double t = angle(target);
+        float sin = (float) Math.sin(t), cos = (float) Math.cos(t);
+        float ax = CX + (R + 6) * sin, ay = CY - (R + 6) * cos, bx = CX + (R + 19) * sin, by = CY - (R + 19) * cos;
+        float dx = (ay - by) * 0.45f, dy = (bx - ax) * 0.45f;
         path.reset();
         path.moveTo(ax, ay);
         path.lineTo(bx + dx, by + dy);
         path.lineTo(bx - dx, by - dy);
         path.close();
+        p.setStyle(Paint.Style.FILL);
         p.setColor(Look.AMBER);
         c.drawPath(path, p);
 
-        if (Float.isFinite(measured)) {
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(2.15f);
-            p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(0xFFFAF5ED);
-            c.drawLine(CX, 101, x(measured, R + 2), y(measured, R + 2), p);
-        } else {
-            p.setTypeface(Look.label);
-            p.setTextSize(12);
-            p.setColor(0xFF97A3B2);
-            c.drawText("AWAITING ANALYSIS", CX, 98, p);
-        }
-
-        // Small built-in readout, with clear distinction between chosen and measured data.
-        p.setStyle(Paint.Style.FILL);
-        p.setColor(0xFF101721);
-        c.drawRoundRect(new RectF(5, 107, W - 5, 135), 4, 4, p);
-        p.setTypeface(Look.label);
-        p.setTextSize(11);
-        p.setTextAlign(Paint.Align.LEFT);
-        p.setColor(0xFFB8A37D);
-        c.drawText("TARGET", 13, 118, p);
+        p.setTextAlign(Paint.Align.CENTER);
         p.setTypeface(Look.mono);
-        p.setTextSize(14);
-        p.setColor(Look.AMBER);
-        c.drawText(String.format(Locale.US, "%.1f", target), 13, 132, p);
-
-        p.setTextAlign(Paint.Align.RIGHT);
-        p.setTypeface(Look.label);
-        p.setTextSize(11);
-        p.setColor(0xFF9AA9BA);
-        c.drawText("SOURCE  ·  LUFS", W - 13, 118, p);
-        p.setTypeface(Look.mono);
-        p.setTextSize(14);
+        p.setTextSize(30);
         p.setColor(Look.TEXT);
-        c.drawText(Float.isFinite(measured) ? String.format(Locale.US, "%.1f", measured) : "--", W - 13, 132, p);
+        float number = playing ? live.lufs() : measured;
+        c.drawText(Float.isFinite(number) ? String.format(Locale.US, "%.1f", number) : "--", CX, 118, p);
+        p.setTypeface(Look.label);
+        p.setTextSize(11);
+        p.setColor(0xFFA5ADB9);
+        c.drawText(playing ? "NOW  ·  LUFS" : Float.isFinite(measured) ? "SOURCE  ·  LUFS" : "AWAITING ANALYSIS", CX, 134, p);
+        p.setTextSize(13);
+        p.setColor(Look.AMBER);
+        c.drawText(String.format(Locale.US, "TARGET %.1f LUFS", target), CX, 156, p);
+        p.setTextAlign(Paint.Align.LEFT);
+        p.setColor(0xFFA5ADB9);
+        p.setTextSize(11);
+        c.drawText("-24", 12, 178, p);
+        p.setTextAlign(Paint.Align.RIGHT);
+        c.drawText("-6", W - 12, 178, p);
         c.restore();
     }
 }
