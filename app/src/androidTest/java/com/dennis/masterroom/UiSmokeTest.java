@@ -375,7 +375,7 @@ public class UiSmokeTest {
         checkTargets();
 
         // Closing the app must not lose unsaved masters.
-        ins.runOnMainSync(() -> activity.forgetAndReload());
+        ins.runOnMainSync(() -> ((com.dennis.masterroom.ui.MainActivity) activity).forgetAndReload());
         waitFor("masters after reopening", 30000, () -> find("LEVEL MATCH") != null && hasText("Clean, Country -14"));
         assertNotNull("Results come back too", find("DISTORTION CHECK"));
         shot("compare_after_reopen");

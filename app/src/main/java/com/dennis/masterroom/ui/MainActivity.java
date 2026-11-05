@@ -1709,7 +1709,7 @@ public final class MainActivity extends Activity {
     }
 
     /** Stands in for Android closing the app, for the screen test. */
-    void forgetAndReload() {
+    public void forgetAndReload() {
         player.clear(); items.clear(); order.clear();
         songUri = null; song = null; masteredSong = null;
         loadRound();
