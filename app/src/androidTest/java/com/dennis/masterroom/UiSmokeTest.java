@@ -255,7 +255,7 @@ public class UiSmokeTest {
         tap("Warm");
         assertNotNull(find("SAVE WARM"));
         assertTrue("Take has a distortion result", hasText("Nothing likely to be heard") || hasText("may be audible"));
-        assertTrue("Level match shows a trim", hasText("Playback trim on Warm"));
+        assertTrue("Level match says how this take plays", hasText("Playing exactly as saved") || hasText("Playback trim on Warm"));
         tap("TONE");
         shot("compare_tone");
         tap("WAVE");

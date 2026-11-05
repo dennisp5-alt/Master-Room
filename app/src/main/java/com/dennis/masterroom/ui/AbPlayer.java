@@ -20,10 +20,11 @@ import java.util.List;
  */
 final class AbPlayer {
     static final class Version {
-        final String name; final File file; final double lufs;
+        final String name; final File file; final double lufs, peakDb; final boolean master;
         final Wav.Header header; final RandomAccessFile raf; float gain = 1;
-        Version(String name, File file, double lufs) throws IOException {
-            this.name = name; this.file = file; this.lufs = lufs;
+        /** @param master a take from the newest round: these play at their real level */
+        Version(String name, File file, double lufs, double peakDb, boolean master) throws IOException {
+            this.name = name; this.file = file; this.lufs = lufs; this.peakDb = peakDb; this.master = master;
             header = Wav.header(file);
             raf = new RandomAccessFile(file, "r");
         }
@@ -50,9 +51,18 @@ final class AbPlayer {
 
     /** Playback gain only: the files on disk are never touched. */
     private void applyMatch() {
-        double quietest = Double.MAX_VALUE;
-        for (Version x : versions) quietest = Math.min(quietest, x.lufs);
-        for (Version x : versions) x.gain = matched ? (float) Math.pow(10, (quietest - x.lufs) / 20) : 1f;
+        double reference = Double.MAX_VALUE, quietest = Double.MAX_VALUE;
+        for (Version x : versions) {
+            quietest = Math.min(quietest, x.lufs);
+            if (x.master) reference = Math.min(reference, x.lufs);
+        }
+        // Everything meets the masters at their own level, so they sound as they will once
+        // saved. Anything brought up stops short of clipping playback.
+        if (reference == Double.MAX_VALUE) reference = quietest;
+        for (Version x : versions) {
+            double db = Math.min(reference - x.lufs, Math.max(0, -0.1 - x.peakDb));
+            x.gain = matched ? (float) Math.pow(10, db / 20) : 1f;
+        }
     }
 
     synchronized void setMatched(boolean on) {

@@ -822,6 +822,7 @@ public final class MainActivity extends Activity {
                 previewMode = pick;
                 applyPreview();
                 drawPreview();
+                refreshCompare();
             });
             Look.type(b, Look.strong, 14, pick == previewMode ? Look.BG : Look.TEXT);
             b.setPadding(0, 0, 0, 0);
@@ -1070,7 +1071,9 @@ public final class MainActivity extends Activity {
         else if (!any) matchLine.setText("Evens out playback level only. Your files are never changed.");
         else if (matched) {
             double trim = player.trimDb(order.get(selected));
-            matchLine.setText(String.format(Locale.US, "Playback trim on %s: %.1f dB. Your files are not changed.", item.name, Math.abs(trim) < 0.05 ? 0.0 : trim));
+            boolean real = Math.abs(trim) < 0.05, preview = previewMode != Preview.Mode.FULL;
+            if (real && item.files != null) matchLine.setText(preview ? "Level is as saved, with a preview on. The saved file has no preview." : "Playing exactly as saved.");
+            else matchLine.setText(String.format(Locale.US, "Playback trim on %s: %.1f dB. Your files are not changed.", item.name, real ? 0.0 : trim));
         }
         else matchLine.setText("Off: each version plays at its real level, so louder ones may seem better.");
 
@@ -1408,7 +1411,7 @@ public final class MainActivity extends Activity {
                 List<Item> all = new ArrayList<>(made);
                 all.addAll(kept);
                 File playSource = new File(home, sourceFile.getName());
-                for (Item i : all) player.add(new AbPlayer.Version(i.name, i.files == null ? playSource : i.files[0], i.lufs));
+                for (Item i : all) player.add(new AbPlayer.Version(i.name, i.files == null ? playSource : i.files[0], i.lufs, i.truePeak, i.report != null && !i.earlier));
                 sessionDir = home;
                 sheet = text;
                 main.post(() -> {
@@ -1478,7 +1481,7 @@ public final class MainActivity extends Activity {
                 Listen l = Listen.to(a);
                 float[] bars = WaveView.measure(a, BARS);
                 final String shortName = name.length() > 16 ? name.substring(0, 16) : name;
-                player.add(new AbPlayer.Version(shortName, f, l.loudness.integrated));
+                player.add(new AbPlayer.Version(shortName, f, l.loudness.integrated, l.truePeakDb, false));
                 main.post(() -> {
                     items.add(new Item(shortName, l, bars, null));
                     order.add(player.size() - 1);
@@ -1684,7 +1687,7 @@ public final class MainActivity extends Activity {
             }
             if (list.isEmpty()) return;
             player.clear();
-            for (Item i : list) player.add(new AbPlayer.Version(i.name, i.files == null ? source : i.files[0], i.lufs));
+            for (Item i : list) player.add(new AbPlayer.Version(i.name, i.files == null ? source : i.files[0], i.lufs, i.truePeak, i.report != null && !i.earlier));
             items.clear(); items.addAll(list);
             order.clear();
             for (int n = 0; n < player.size(); n++) order.add(n);
