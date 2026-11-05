@@ -19,7 +19,7 @@ final class Eq {
 
     static final class Moves {
         double lowDb, lowMidDb, presenceDb, airDb;
-        double sideAirDb, sideLowMidDb;
+        double sideAirDb, sideLowMidDb, sideMidDb;
         double monoBelowHz;
 
         double midDb(double f) {
@@ -27,7 +27,7 @@ final class Eq {
                     + bell(f, 3200, 0.8, presenceDb) + highShelf(f, 9000, airDb);
         }
         double sideDb(double f) {
-            return midDb(f) + bell(f, 280, 0.8, sideLowMidDb) + highShelf(f, 9000, sideAirDb);
+            return midDb(f) + bell(f, 280, 0.8, sideLowMidDb) + bell(f, 1500, 1.2, sideMidDb) + highShelf(f, 9000, sideAirDb);
         }
         void add(double low, double lowMid, double presence, double air, double limit) {
             lowDb = clamp(lowDb + low, limit); lowMidDb = clamp(lowMidDb + lowMid, limit);
@@ -43,6 +43,7 @@ final class Eq {
             add(out, "Presence (3.2 kHz)", presenceDb);
             add(out, "Air (above 9 kHz)", airDb);
             add(out, "Sides, low mids", sideLowMidDb);
+            add(out, "Sides, mids", sideMidDb);
             add(out, "Sides, air", sideAirDb);
             if (monoBelowHz > 0) out.add(String.format(Locale.US, "Bass centred below %.0f Hz", monoBelowHz));
             return out;
@@ -78,7 +79,7 @@ final class Eq {
         double[] x = solve(basis, gap, weight);
         Moves m = new Moves();
         // A curve measured from real records earns bigger moves than the built-in guess.
-        double reach = target.measured ? 3.0 : 2.0;
+        double reach = target.reach();
         m.lowDb = shape(x[0], strength, reach);
         m.lowMidDb = shape(x[1], strength, reach);
         m.presenceDb = shape(x[2], strength, reach);
@@ -92,6 +93,7 @@ final class Eq {
             }
             if (n > 0) m.sideAirDb = shape(sum / n, strength, 2.0);
             if (ln > 0) m.sideLowMidDb = shape(low / ln, strength, 2.0);
+            if (!Double.isNaN(target.widthDb)) m.sideMidDb = shape(target.widthDb - song.widthDb(), strength, 1.5);
         }
         if (song.lowSideDb > -14) m.monoBelowHz = 100;
         return m;

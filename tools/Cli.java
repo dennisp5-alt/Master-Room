@@ -11,7 +11,9 @@ public final class Cli {
         double lufs = Double.parseDouble(a[2]);
         Target.Style style = a.length > 3 ? Target.Style.valueOf(a[3]) : Target.Style.COUNTRY;
         Engineer.Progress p = (s, n) -> {};
-        Engineer.Session s = Engineer.prepare(in, Target.builtIn(style), lufs, p);
+        Engineer.Options o = new Engineer.Options();
+        o.cleanUp = System.getProperty("cleanup") == null;
+        Engineer.Session s = Engineer.prepare(in, Target.builtIn(style, System.getProperty("commercial") != null), lufs, o, p);
         System.out.printf(Locale.US, "IN %.2f LUFS LRA %.1f TP %.2f crest %.1f cutoff %.0f lowSide %.1f%n",
                 s.before.loudness.integrated, s.before.loudness.lra, s.before.truePeakDb, s.before.crestDb, s.before.cutoffHz, s.before.lowSideDb);
         for (String n : s.notes) System.out.println("  " + n);

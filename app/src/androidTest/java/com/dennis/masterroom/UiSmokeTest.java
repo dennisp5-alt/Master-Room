@@ -355,6 +355,32 @@ public class UiSmokeTest {
         tap("REMOVE");
         assertFalse(hasText("1 reference record"));
         tap("END ALBUM");
+
+        // Remaster: stopping keeps the last takes, and the old round stays to compare.
+        tap("BACK TO YOUR MASTERS");
+        assertTrue("Both streaming checks ran", hasText("MP3 128") && hasText("AAC 256"));
+        tap("REMASTER");
+        assertNotNull(find("MASTER IT"));
+        tap("Commercial");
+        tap("MASTER IT");
+        SystemClock.sleep(2500);
+        tap("STOP MASTERING");
+        waitFor("stop during a remaster", 60000, () -> hasText("Your last takes are still here"));
+        tap("BACK TO YOUR MASTERS");
+        assertNotNull("Stop keeps the takes", find("Clean"));
+        tap("REMASTER");
+        tap("MASTER IT");
+        waitFor("the second round", 20 * 60 * 1000, () -> find("LEVEL MATCH") != null && hasText("Clean, Country -14"));
+        shot("compare_remastered");
+        checkTargets();
+
+        // Closing the app must not lose unsaved masters.
+        ins.runOnMainSync(() -> activity.forgetAndReload());
+        waitFor("masters after reopening", 30000, () -> find("LEVEL MATCH") != null && hasText("Clean, Country -14"));
+        assertNotNull("Results come back too", find("DISTORTION CHECK"));
+        shot("compare_after_reopen");
+        tap("Clean");
+        assertNotNull(find("SAVE CLEAN"));
         activity.finish();
     }
 

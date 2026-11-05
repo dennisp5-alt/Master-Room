@@ -13,10 +13,20 @@ public final class Target {
     /** Side relative to mid per band, or null when no reference gives it. */
     public final double[] sideRelDb;
     public final boolean measured;
+    /** Closes more of the gap, with a higher limit on each move. */
+    public final boolean commercial;
+    /** What the reference records measure, or NaN when they do not say. */
+    public double punchDb = Double.NaN, widthDb = Double.NaN, lowEndDb = Double.NaN;
 
-    private Target(String name, double[] midDb, double[] sideRelDb, boolean measured) {
-        this.name = name; this.midDb = midDb; this.sideRelDb = sideRelDb; this.measured = measured;
+    Target(String name, double[] midDb, double[] sideRelDb, boolean measured) { this(name, midDb, sideRelDb, measured, false); }
+
+    private Target(String name, double[] midDb, double[] sideRelDb, boolean measured, boolean commercial) {
+        this.name = name; this.midDb = midDb; this.sideRelDb = sideRelDb; this.measured = measured; this.commercial = commercial;
     }
+
+    /** What the session uses from a target's strength, in one place. */
+    double strength() { return commercial ? 0.8 : measured ? 0.75 : 0.6; }
+    double reach() { return commercial || measured ? 3.0 : 2.0; }
 
     /**
      * Offsets from the base curve: lows, low mids, presence, air, in dB. Country, Rock and Pop
@@ -53,6 +63,10 @@ public final class Target {
         Style(String label, double low, double lowMid, double presence, double air, double subHz) {
             this.label = label; this.low = low; this.lowMid = lowMid; this.presence = presence; this.air = air; this.subHz = subHz;
         }
+        /** The curves with published figures behind them, which Commercial takes further. */
+        boolean surveyed() {
+            return this == FOLK || this == JAZZ || this == RNB_SOUL || this == FUNK_DISCO || this == HIP_HOP || this == ELECTRONIC;
+        }
     }
 
     /**
@@ -60,22 +74,28 @@ public final class Target {
      * 2013): about -5 dB per octave from 100 Hz to 4 kHz, steeper above, low-cut near 60 Hz.
      * The style offsets are starting points, not measurements of each genre.
      */
-    public static Target builtIn(Style style) {
+    public static Target builtIn(Style style) { return builtIn(style, false); }
+
+    /** @param commercial the surveyed curves at three-quarters of their published size, and firmer moves on any genre */
+    public static Target builtIn(Style style, boolean commercial) {
+        double size = commercial && style.surveyed() ? 1.5 : 1;
         double[] t = new double[31];
         for (int i = 0; i < 31; i++) {
             double f = Listen.BANDS[i], oct = log2(f / 100);
             double y = -5 * oct;
             if (f > 4000) y -= 2.5 * log2(f / 4000);
             if (f < style.subHz) y -= 12 * log2(style.subHz / f);
-            y += Eq.lowShelf(f, 90, style.low) + Eq.bell(f, 280, 0.8, style.lowMid)
-                    + Eq.bell(f, 3200, 0.8, style.presence) + Eq.highShelf(f, 9000, style.air);
+            y += size * (Eq.lowShelf(f, 90, style.low) + Eq.bell(f, 280, 0.8, style.lowMid)
+                    + Eq.bell(f, 3200, 0.8, style.presence) + Eq.highShelf(f, 9000, style.air));
             t[i] = y;
         }
-        return new Target(style.label + " (starting curve)", t, null, false);
+        return new Target(style.label + (commercial ? " (starting curve, Commercial)" : " (starting curve)"), t, null, false, commercial);
     }
 
     /** Average of songs the user trusts. Each is aligned by its own 150 Hz-3 kHz level. */
-    public static Target fromReferences(String name, List<Listen> references) {
+    public static Target fromReferences(String name, List<Listen> references) { return fromReferences(name, references, false); }
+
+    public static Target fromReferences(String name, List<Listen> references, boolean commercial) {
         double[] mid = new double[31], side = new double[31];
         for (Listen l : references) {
             double centre = 0; int n = 0;
@@ -84,7 +104,18 @@ public final class Target {
             for (int i = 0; i < 31; i++) { mid[i] += l.midDb[i] - centre; side[i] += l.sideDb[i] - l.midDb[i]; }
         }
         for (int i = 0; i < 31; i++) { mid[i] /= references.size(); side[i] /= references.size(); }
-        return new Target(name, mid, side, true);
+        Target out = new Target(name, mid, side, true, commercial);
+        double punch = 0, width = 0, low = 0;
+        int counted = 0;
+        for (Listen l : references) {
+            width += l.widthDb();
+            low += l.lowEndDb();
+            if (!Double.isNaN(l.punchDb)) { punch += l.punchDb; counted++; }
+        }
+        out.widthDb = width / references.size();
+        out.lowEndDb = low / references.size();
+        if (counted > 0) out.punchDb = punch / counted;
+        return out;
     }
 
     static double log2(double x) { return Math.log(x) / Math.log(2); }

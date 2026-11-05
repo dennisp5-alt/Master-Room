@@ -26,6 +26,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 
 /** Finished files for release: a 320 kbps MP3 and WAVs that carry the song's details. */
@@ -37,7 +40,9 @@ public final class Release {
     }
 
     /** Encodes a 16-bit 44.1 kHz stereo WAV at 320 kbps, with tags and gapless information. */
-    public static void mp3(File wav, File out, Info info) throws IOException {
+    public static void mp3(File wav, File out, Info info) throws IOException { encode(wav, out, info, 320); }
+
+    static void encode(File wav, File out, Info info, int kbps) throws IOException {
         Lame lame = new Lame();
         MPGLib mpg = new MPGLib();
         VBRTag vbr = new VBRTag();
@@ -72,7 +77,7 @@ public final class Release {
             f.num_channels = 2;
             f.in_samplerate = 44100;
             f.out_samplerate = 44100;
-            f.brate = 320;
+            f.brate = kbps;
             f.VBR = VbrMode.vbr_off;
             f.mode = MPEGMode.JOINT_STEREO;
             f.quality = 2;
@@ -127,6 +132,43 @@ public final class Release {
         } finally {
             lame.lame_close(f);
         }
+    }
+
+    /** Reads an MP3 back to audio, without clipping anything the encoder pushed over full scale. */
+    static Audio decode(File mp3) throws IOException {
+        MPGLib mpg = new MPGLib();
+        Interface intf = new Interface();
+        Common common = new Common();
+        mpg.setModules(intf, common);
+        intf.setModules(new VBRTag(), common);
+        MPGLib.mpstr_tag hip = mpg.hip_decode_init();
+        List<float[]> ls = new ArrayList<>(), rs = new ArrayList<>();
+        int total = 0;
+        try (InputStream in = new FileInputStream(mp3)) {
+            byte[] chunk = new byte[1024];
+            float[] l = new float[1152], r = new float[1152];
+            int got;
+            while ((got = in.read(chunk)) > 0) {
+                int len = got;
+                while (true) {
+                    int n = mpg.hip_decode1_unclipped(hip, chunk, 0, len, l, r);
+                    if (n < 0) throw new IOException("MP3 could not be decoded");
+                    if (n == 0) break;
+                    ls.add(Arrays.copyOf(l, n)); rs.add(Arrays.copyOf(r, n));
+                    total += n;
+                    len = 0;
+                }
+            }
+        } finally {
+            mpg.hip_decode_exit(hip);
+        }
+        Audio out = new Audio(total, 44100);
+        int at = 0;
+        for (int b = 0; b < ls.size(); b++) {
+            float[] l = ls.get(b), r = rs.get(b);
+            for (int i = 0; i < l.length; i++, at++) { out.l[at] = l[i] / 32768f; out.r[at] = r[i] / 32768f; }
+        }
+        return out;
     }
 
     /** Copies a WAV with a standard LIST INFO block of the song's details added at the end. */

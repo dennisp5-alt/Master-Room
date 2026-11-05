@@ -40,6 +40,7 @@ import com.dennis.masterroom.engine.Engineer;
 import com.dennis.masterroom.engine.Listen;
 import com.dennis.masterroom.engine.Preview;
 import com.dennis.masterroom.engine.Release;
+import com.dennis.masterroom.engine.Streaming;
 import com.dennis.masterroom.engine.Target;
 import com.dennis.masterroom.engine.Taste;
 import com.dennis.masterroom.engine.Wav;
@@ -47,6 +48,7 @@ import com.dennis.masterroom.engine.Wav;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -70,14 +72,21 @@ public final class MainActivity extends Activity {
 
     /** One version in the comparison. Numbers are always measured, never estimated. */
     private static final class Item {
-        final String name; final double lufs, lra, truePeak; final double[] mid, side; final float[] bars; final File[] files;
-        boolean saved;
+        String name;
+        final String take; final double lufs, lra, truePeak, punch; final double[] mid, side; final float[] bars;
+        File[] files;
+        boolean saved, earlier;
         Distortion.Report report;
-        String verdict = "";
+        String verdict = "", streaming = "", notes = "";
         Item(String name, Listen l, float[] bars, File[] files) {
-            this.name = name; lufs = l.loudness.integrated; lra = l.loudness.lra; truePeak = l.truePeakDb;
-            mid = l.midDb; side = l.sideDb; this.bars = bars; this.files = files;
+            this(name, name, l.loudness.integrated, l.loudness.lra, l.truePeakDb, l.punchDb, l.midDb, l.sideDb, bars, files);
         }
+        Item(String name, String take, double lufs, double lra, double truePeak, double punch, double[] mid, double[] side, float[] bars, File[] files) {
+            this.name = name; this.take = take; this.lufs = lufs; this.lra = lra; this.truePeak = truePeak; this.punch = punch;
+            this.mid = mid; this.side = side; this.bars = bars; this.files = files;
+        }
+        double width() { return Listen.fromBands(mid, side).widthDb(); }
+        double lowEnd() { return Listen.fromBands(mid, side).lowEndDb(); }
     }
 
     // The session lives here rather than in the screen, so a render, a selection and
@@ -108,7 +117,8 @@ public final class MainActivity extends Activity {
     private String lastRoute = "";
     private Button albumButton, manageButton;
     private LinearLayout dock, shelfList, previewRow, releasePanel, checkPanel, spotRows;
-    private TextView checkLine;
+    private TextView checkLine, streamLine, gapLine;
+    private LinearLayout strengthRow, gapPanel;
     private Button backToTakes;
     private ImageView releaseChevron;
     private EditText titleField, artistField, albumField, yearField, trackField, isrcField;
@@ -125,6 +135,10 @@ public final class MainActivity extends Activity {
     private static boolean matchBeforeBlind = true, saving, working, rendering, stopping, importing, openCompareNext;
     private static double[] targetMid;
     private static File sessionDir;
+    private static boolean commercial, cleanUpOn = true;
+    /** The settings behind the newest takes, and the song they came from. */
+    private static String roundLabel = "", masteredSong;
+    private static double refPunch = Double.NaN, refWidth = Double.NaN, refLow = Double.NaN;
     private static Preview.Mode previewMode = Preview.Mode.FULL;
     private static volatile int measureToken;
     private static int sourceFlatPeaks;
@@ -139,6 +153,9 @@ public final class MainActivity extends Activity {
         try {
             style = Target.Style.valueOf(getSharedPreferences("choices", MODE_PRIVATE).getString("style", style.name()));
         } catch (IllegalArgumentException ignored) { }
+        commercial = getSharedPreferences("choices", MODE_PRIVATE).getBoolean("commercial", false);
+        cleanUpOn = getSharedPreferences("choices", MODE_PRIVATE).getBoolean("cleanUp", true);
+        if (Streaming.phoneCodec == null) Streaming.phoneCodec = new AacCodec();
         app = getApplicationContext();
         current = this;
         Look.load(this);
@@ -173,6 +190,8 @@ public final class MainActivity extends Activity {
         refreshReferences();
         refreshAlbum();
         refreshCeiling();
+        drawStrength();
+        if (items.isEmpty() && !working) loadRound();
         restore();
         main.postDelayed(this::tick, 100);
     }
@@ -191,7 +210,7 @@ public final class MainActivity extends Activity {
         statusLine.setText(statusNow);
         lightPath(runningStage);
         sheetText.setText(sheet);
-        if (!items.isEmpty() && !order.isEmpty()) {
+        if (!items.isEmpty() && !order.isEmpty() && !rendering) {
             wave.setFraction(player.fraction());
             compareLink.setVisibility(View.VISIBLE);
         }
@@ -323,6 +342,9 @@ public final class MainActivity extends Activity {
         genreList.setOrientation(LinearLayout.VERTICAL);
         genreList.setVisibility(View.GONE);
         controls.addView(genreList, Parts.line(Parts.WRAP, 6));
+        strengthRow = new LinearLayout(this);
+        strengthRow.setOrientation(LinearLayout.VERTICAL);
+        controls.addView(strengthRow, Parts.line(Parts.WRAP, 6));
         referenceLine = parts.text("", Look.body, 11, Look.DIM);
         referenceLine.setSingleLine(true);
         referenceLine.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -451,16 +473,44 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** How firmly the tone moves, and whether the two clean-up stages run. */
+    private void drawStrength() {
+        strengthRow.removeAllViews();
+        LinearLayout tone = parts.row(), clean = parts.row();
+        tone.addView(parts.segment("Gentle", !commercial, Look.strong, v -> setChoice("commercial", false)));
+        tone.addView(parts.segment("Commercial", commercial, Look.strong, v -> setChoice("commercial", true)));
+        clean.addView(parts.segment("Clean-up on", cleanUpOn, Look.strong, v -> setChoice("cleanUp", true)));
+        clean.addView(parts.segment("Clean-up off", !cleanUpOn, Look.strong, v -> setChoice("cleanUp", false)));
+        strengthRow.addView(tone, Parts.line(Look.dp(48), 0));
+        strengthRow.addView(clean, Parts.line(Look.dp(48), 6));
+    }
+
+    private void setChoice(String key, boolean on) {
+        if (key.equals("commercial")) commercial = on; else cleanUpOn = on;
+        getSharedPreferences("choices", MODE_PRIVATE).edit().putBoolean(key, on).apply();
+        drawStrength();
+    }
+
     /** Opens the list with the top of it in view, clear of the master button. */
     private void toggleGenres() {
         boolean open = genreList.getVisibility() != View.VISIBLE;
         genreList.setVisibility(open ? View.VISIBLE : View.GONE);
         drawStyles();
-        if (open) main.postDelayed(() -> {
-            android.graphics.Rect at = new android.graphics.Rect();
-            sessionScreen.offsetDescendantRectToMyCoords(styleRow, at);
-            sessionScreen.smoothScrollTo(0, at.top - Look.dp(10));
-        }, 80);
+        if (open) main.postDelayed(this::showSettings, 80);
+    }
+
+    private void showSettings() {
+        android.graphics.Rect at = new android.graphics.Rect();
+        sessionScreen.offsetDescendantRectToMyCoords(styleRow, at);
+        sessionScreen.smoothScrollTo(0, at.top - Look.dp(10));
+    }
+
+    /** Back to the settings with the song loaded. These takes stay until the new ones finish. */
+    private void remaster() {
+        showCompare(false);
+        statusNow = "Change your settings, then press Master It. These takes stay until the new ones are done.";
+        statusLine.setText(statusNow);
+        main.postDelayed(this::showSettings, 80);
     }
 
     private void drawLevels() {
@@ -537,11 +587,11 @@ public final class MainActivity extends Activity {
     }
 
     private static int stageOf(String step) {
-        if (step.contains("EQ")) return 0;
+        if (step.contains("EQ") || step.contains("Cleaning") || step.contains("verses")) return 0;
         if (step.contains("harsh")) return 1;
         if (step.contains("riding") || step.contains("bus compressor")) return 2;
         if (step.contains("colour")) return 3;
-        if (step.contains("level") || step.contains("low end") || step.contains("easing")) return 4;
+        if (step.contains("level") || step.contains("low end") || step.contains("easing") || step.contains("density")) return 4;
         if (step.contains("clipper") || step.contains("checking")) return 5;
         return 0;
     }
@@ -658,6 +708,16 @@ public final class MainActivity extends Activity {
         dash.setStroke(Look.dp(1), Look.AMBER_DIM, Look.dp(5), Look.dp(4));
         Look.surface(importButton, dash);
         column.addView(importButton, Parts.line(Look.dp(52), 6));
+        Button again = parts.button("REMASTER", v -> remaster());
+        Look.surface(again, Look.shape(Look.BG, Look.AMBER, 7));
+        Look.type(again, Look.title, 18, Look.AMBER);
+        again.setLetterSpacing(0.1f);
+        column.addView(again, Parts.line(Look.dp(52), 6));
+
+        gapPanel = parts.panel(10, column);
+        gapPanel.addView(parts.label("AGAINST YOUR RECORDS"));
+        gapLine = parts.text("", Look.mono, 13, Look.TEXT);
+        gapPanel.addView(gapLine, Parts.line(Parts.WRAP, 6));
 
         checkPanel = parts.panel(10, column);
         checkPanel.addView(parts.label("DISTORTION CHECK"));
@@ -666,6 +726,8 @@ public final class MainActivity extends Activity {
         spotRows = new LinearLayout(this);
         spotRows.setOrientation(LinearLayout.VERTICAL);
         checkPanel.addView(spotRows, Parts.line(Parts.WRAP, 4));
+        streamLine = parts.text("", Look.body, 13, Look.DIM);
+        checkPanel.addView(streamLine, Parts.line(Parts.WRAP, 8));
 
         LinearLayout blindPanel = parts.panel(10, column);
         LinearLayout blindTop = parts.row();
@@ -846,7 +908,7 @@ public final class MainActivity extends Activity {
         } else if (blind == BLIND_ON) {
             pickedShown = selected;
             blind = BLIND_RESULTS;
-            remember("blind", items.get(order.get(selected)).name);
+            remember("blind", items.get(order.get(selected)).take);
         } else {
             int keep = order.get(selected);
             Collections.sort(order);
@@ -889,10 +951,11 @@ public final class MainActivity extends Activity {
             names.addView(versionTitle);
             if (!hide && blind != BLIND_RESULTS) {
                 String detail = order.get(i) == 0 ? "ORIGINAL AUDIO"
-                        : "Clean".equals(item.name) ? "TRANSPARENT / NEUTRAL"
-                        : "Warm".equals(item.name) ? "ANALOGUE COLOUR"
-                        : "Punch".equals(item.name) ? "TRANSIENT IMPACT"
-                        : "Yours".equals(item.name) ? "BUILT FROM YOUR PICKS" : "IMPORTED MASTER";
+                        : item.earlier ? "EARLIER ROUND"
+                        : "Clean".equals(item.take) ? "TRANSPARENT / NEUTRAL"
+                        : "Warm".equals(item.take) ? "ANALOGUE COLOUR"
+                        : "Punch".equals(item.take) ? "TRANSIENT IMPACT"
+                        : "Yours".equals(item.take) ? "BUILT FROM YOUR PICKS" : "IMPORTED MASTER";
                 if (item.report != null) detail += item.report.passed() ? "  /  CLEAN" : "  /  CHECK";
                 TextView versionDetail = parts.text(detail, Look.label, 10, item.report != null && !item.report.passed() ? Look.AMBER : Look.DIM);
                 versionDetail.setSingleLine(true);
@@ -926,7 +989,10 @@ public final class MainActivity extends Activity {
             serious[i] = report.spots.get(i).audible;
         }
         wave.setMarks(marks, serious);
+        drawGap(item, hide);
+        streamLine.setVisibility(item == null || item.streaming.isEmpty() ? View.GONE : View.VISIBLE);
         if (item == null) return;
+        streamLine.setText(item.streaming);
         if (order.get(selected) == 0) {
             checkLine.setText(sourceFlatPeaks > 0 ? sourceFlatPeaks + " flat-topped peaks are already in this file. Mastering cannot undo them."
                     : "No flat-topped peaks found in the source.");
@@ -949,6 +1015,29 @@ public final class MainActivity extends Activity {
             Look.type(b, Look.mono, 14, serious[i] ? Look.HOT : Look.AMBER);
             r.addView(b, Parts.share(Look.dp(48), 1, i % 3 == 0 ? 0 : 6));
         }
+    }
+
+    /** The take against the records it was aimed at, on more than tone. */
+    private void drawGap(Item item, boolean hide) {
+        boolean show = !hide && item != null && !Double.isNaN(refWidth) && order.get(selected) != 0;
+        gapPanel.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) return;
+        StringBuilder b = new StringBuilder();
+        if (!Double.isNaN(refPunch)) b.append(gap("Punch", item.punch, refPunch)).append('\n');
+        b.append(gap("Low end", item.lowEnd(), refLow)).append('\n').append(gap("Width", item.width(), refWidth));
+        Item closest = null;
+        double best = Double.MAX_VALUE;
+        for (Item i : items) {
+            if (i.files == null || i.report == null) continue;
+            double miss = Math.abs(i.lowEnd() - refLow) + Math.abs(i.width() - refWidth) + (Double.isNaN(refPunch) ? 0 : Math.abs(i.punch - refPunch));
+            if (miss < best) { best = miss; closest = i; }
+        }
+        if (closest != null) b.append("\nClosest: ").append(closest.name);
+        gapLine.setText(b.toString());
+    }
+
+    private static String gap(String name, double take, double records) {
+        return String.format(Locale.US, "%-8s %+.1f dB vs records", name, take - records);
     }
 
     private static String number(double v) {
@@ -1192,9 +1281,13 @@ public final class MainActivity extends Activity {
         java.util.Arrays.fill(stageDone, false);
         runningStage = -1;
         progressNow = 0;
-        statusNow = "Stopped. Choose your settings and press Master It.";
+        statusNow = items.isEmpty() ? "Stopped. Choose your settings and press Master It."
+                : "Stopped. Your last takes are still here.";
         RenderService.end(app, null);
-        ui(a -> { a.applyBusy(); a.lightPath(-1); a.statusLine.setText(statusNow); });
+        ui(a -> {
+            a.applyBusy(); a.lightPath(-1); a.statusLine.setText(statusNow);
+            if (!order.isEmpty()) a.compareLink.setVisibility(View.VISIBLE);
+        });
     }
 
     // Mastering ---------------------------------------------------------------
@@ -1206,18 +1299,24 @@ public final class MainActivity extends Activity {
         final String name = song.replaceAll("[\\\\/:*?\"<>|]", "_");
         final String styleName = style.name();
         final List<String> log = tasteLog();
+        final Engineer.Options options = new Engineer.Options();
+        options.cleanUp = cleanUpOn;
+        final boolean same = song.equals(masteredSong) && sessionDir != null && new File(sessionDir, "source.wav").exists();
+        final String settings = settingsLabel();
+        final List<Item> lastRound = new ArrayList<>();
+        final String lastLabel = roundLabel;
+        if (same) for (Item i : items) if (!i.earlier && i.report != null) lastRound.add(i);
         measureToken++;
         rendering = true;
         stopping = false;
         Engineer.requestStop(false);
-        player.clear(); order.clear(); items.clear(); selected = 0;
+        player.pause();
         blind = BLIND_OFF; pickedShown = -1;
         player.setMatched(true);
         previewMode = Preview.Mode.FULL;
         applyPreview();
         drawPreview();
         compareLink.setVisibility(View.GONE);
-        refreshCompare();
         busy(true);
         resetPath(false);
         progressNow = 0;
@@ -1229,12 +1328,12 @@ public final class MainActivity extends Activity {
         worker.execute(() -> {
             try {
                 long t0 = System.nanoTime();
-                File dir = new File(app.getExternalFilesDir(null), "session");
+                File base = app.getExternalFilesDir(null), home = new File(base, "session");
+                File dir = new File(base, "session_new");
                 deleteAll(dir);
                 dir.mkdirs();
-                sessionDir = dir;
                 status("Opening the song");
-                Audio in = Decoder.open(app, uri);
+                Audio in = same ? Wav.read(new File(sessionDir, "source.wav")) : Decoder.open(app, uri);
                 File sourceFile = new File(dir, "source.wav");
                 Wav.write(sourceFile, in, 24);
                 List<Engineer.Recipe> recipes = new ArrayList<>();
@@ -1258,15 +1357,13 @@ public final class MainActivity extends Activity {
                 };
                 final String meta = trackMeta(in);
                 float[] sourceBars = WaveView.measure(in, BARS);
-                Engineer.Session session = Engineer.prepare(in, target, asked, bar);
+                Engineer.Session session = Engineer.prepare(in, target, asked, options, bar);
                 final Listen before = session.before;
                 sourceFlatPeaks = session.sourceFlatPeaks;
                 main.post(() -> { setMeta(meta); measuredNow = before; ui(a -> a.showMeasured(before)); });
-                player.add(new AbPlayer.Version("Source", sourceFile, before.loudness.integrated));
                 final List<Item> made = new ArrayList<>();
                 made.add(new Item("Source", before, sourceBars, null));
                 in = null;
-                targetMid = target.midDb;
                 List<Engineer.Result> results = new ArrayList<>();
                 for (Engineer.Recipe take : recipes) {
                     takeIndex[0]++;
@@ -1275,25 +1372,57 @@ public final class MainActivity extends Activity {
                     File[] files = Engineer.deliver(r, dir, name + "_" + take.label);
                     r.master = null;
                     results.add(r);
-                    player.add(new AbPlayer.Version(take.label, files[0], r.after.loudness.integrated));
                     Item done = new Item(take.label, r.after, bars, files);
                     done.report = r.distortion;
                     done.verdict = r.verdict;
+                    done.streaming = r.streaming.verdict();
                     made.add(done);
                 }
                 session.release();
                 final String text = Engineer.sheet(session, results) + albumCheck(results)
                         + String.format(Locale.US, "%nFinished in %.1f minutes", (System.nanoTime() - t0) / 60e9);
+                for (Item i : made) i.notes = text;
+                // Only now do the old takes move aside, so stopping loses nothing.
+                player.clear();
+                File shelf = new File(base, "session_earlier");
+                deleteAll(shelf);
+                shelf.mkdirs();
+                List<Item> kept = new ArrayList<>();
+                for (Item i : lastRound) {
+                    File[] moved = new File[i.files.length];
+                    for (int f = 0; f < moved.length; f++) { moved[f] = new File(shelf, i.files[f].getName()); i.files[f].renameTo(moved[f]); }
+                    i.files = moved;
+                    i.earlier = true;
+                    i.name = i.take + ", " + lastLabel;
+                    kept.add(i);
+                }
+                deleteAll(home);
+                home.mkdirs();
+                File[] fresh = dir.listFiles();
+                if (fresh != null) for (File f : fresh) f.renameTo(new File(home, f.getName()));
+                dir.delete();
+                for (Item i : made) if (i.files != null) for (int f = 0; f < i.files.length; f++) i.files[f] = new File(home, i.files[f].getName());
+                List<Item> all = new ArrayList<>(made);
+                all.addAll(kept);
+                File playSource = new File(home, sourceFile.getName());
+                for (Item i : all) player.add(new AbPlayer.Version(i.name, i.files == null ? playSource : i.files[0], i.lufs));
+                sessionDir = home;
                 sheet = text;
                 main.post(() -> {
+                    targetMid = target.midDb;
+                    refPunch = target.punchDb; refWidth = target.widthDb; refLow = target.lowEndDb;
+                    roundLabel = settings;
+                    masteredSong = song;
+                    items.clear(); order.clear(); selected = 0;
                     working = false;
                     rendering = false;
                     stopping = false;
                     Engineer.requestStop(false);
-                    items.addAll(made);
+                    items.addAll(all);
                     for (int i = 0; i < player.size(); i++) order.add(i);
                     selected = 0;
                     player.select(0);
+                    worker.execute(MainActivity::storeRound);
                     java.util.Arrays.fill(stageDone, true);
                     runningStage = -1;
                     statusNow = "Done. Your takes are ready to compare.";
@@ -1302,7 +1431,7 @@ public final class MainActivity extends Activity {
                     ui(a -> { a.finishRender(text); });
                 });
             } catch (Engineer.Stopped e) {
-                player.clear();
+                deleteAll(new File(app.getExternalFilesDir(null), "session_new"));
                 main.post(MainActivity::stopped);
             } catch (Throwable e) {
                 fail(e);
@@ -1394,13 +1523,14 @@ public final class MainActivity extends Activity {
                 storeWav(chosen.files[1], base + "_16bit_44k.wav", info);
                 store(mp3, "audio/mpeg");
                 File notes = new File(sessionDir, base + "_session.txt");
-                try (PrintWriter w = new PrintWriter(new FileWriter(notes))) { w.print(sheet); }
+                try (PrintWriter w = new PrintWriter(new FileWriter(notes))) { w.print(chosen.notes.isEmpty() ? sheet : chosen.notes); }
                 store(notes, "text/plain");
                 addToAlbum(chosen);
                 main.post(() -> {
                     saving = false;
                     chosen.saved = true;
-                    remember("saved", chosen.name);
+                    worker.execute(MainActivity::storeRound);
+                    remember("saved", chosen.take);
                     RenderService.end(app, "Saved to Download/Master Room");
                     ui(a -> {
                         a.refreshCompare();
@@ -1447,6 +1577,145 @@ public final class MainActivity extends Activity {
         if (list != null) for (File f : list) f.delete();
     }
 
+    // Finished masters stay on the phone until new ones replace them -----------
+
+    private static String settingsLabel() {
+        return style.label + (commercial ? " Comm " : " ") + String.format(Locale.US, "%.0f", level);
+    }
+
+    private static File roundFile() { return new File(app.getExternalFilesDir(null), "masters.properties"); }
+
+    private static void storeRound() {
+        final List<Item> list = new ArrayList<>();
+        for (Item i : items) if (i.files != null || "Source".equals(i.take)) list.add(i);
+        java.util.Properties p = new java.util.Properties();
+        p.setProperty("song", song == null ? "" : song);
+        p.setProperty("uri", songUri == null ? "" : songUri.toString());
+        p.setProperty("meta", metaNow == null ? "" : metaNow);
+        p.setProperty("label", roundLabel);
+        p.setProperty("sheet", sheet == null ? "" : sheet);
+        p.setProperty("level", Double.toString(level));
+        p.setProperty("count", Integer.toString(list.size()));
+        p.setProperty("refs", refPunch + "," + refWidth + "," + refLow);
+        if (targetMid != null) p.setProperty("target", csv(targetMid));
+        p.setProperty("flat", Integer.toString(sourceFlatPeaks));
+        for (int n = 0; n < list.size(); n++) {
+            Item i = list.get(n);
+            String k = "item." + n + ".";
+            p.setProperty(k + "name", i.name);
+            p.setProperty(k + "take", i.take);
+            p.setProperty(k + "numbers", i.lufs + "," + i.lra + "," + i.truePeak + "," + i.punch);
+            p.setProperty(k + "mid", csv(i.mid));
+            p.setProperty(k + "side", csv(i.side));
+            StringBuilder bars = new StringBuilder();
+            for (float b : i.bars) bars.append(bars.length() == 0 ? "" : ",").append(b);
+            p.setProperty(k + "bars", bars.toString());
+            p.setProperty(k + "flags", i.saved + "," + i.earlier);
+            p.setProperty(k + "verdict", i.verdict);
+            p.setProperty(k + "streaming", i.streaming);
+            p.setProperty(k + "notes", i.notes);
+            if (i.files != null) p.setProperty(k + "files", i.files[0].getPath() + "|" + i.files[1].getPath());
+            if (i.report != null) {
+                StringBuilder spots = new StringBuilder();
+                for (Distortion.Spot s : i.report.spots) spots.append(s.startSeconds).append(',').append(s.endSeconds).append(',').append(s.scoreDb).append(',').append(s.audible).append(';');
+                p.setProperty(k + "report", i.report.audible + "," + i.report.borderline + "," + i.report.worstDb);
+                p.setProperty(k + "spots", spots.toString());
+            }
+        }
+        File next = new File(roundFile().getPath() + ".tmp");
+        try (OutputStream out = new FileOutputStream(next)) {
+            p.store(out, null);
+        } catch (IOException e) {
+            return;
+        }
+        next.renameTo(roundFile());
+    }
+
+    /** After the app has been closed: puts the last masters back, files and results. */
+    private static void loadRound() {
+        File f = roundFile();
+        if (!f.exists()) return;
+        java.util.Properties p = new java.util.Properties();
+        try (InputStream in = new FileInputStream(f)) {
+            p.load(in);
+            File home = new File(app.getExternalFilesDir(null), "session");
+            File source = new File(home, "source.wav");
+            if (!source.exists()) return;
+            List<Item> list = new ArrayList<>();
+            int count = Integer.parseInt(p.getProperty("count", "0"));
+            for (int n = 0; n < count; n++) {
+                String k = "item." + n + ".";
+                double[] v = numbers(p.getProperty(k + "numbers"));
+                String[] barText = p.getProperty(k + "bars").split(",");
+                float[] bars = new float[barText.length];
+                for (int b = 0; b < bars.length; b++) bars[b] = Float.parseFloat(barText[b]);
+                File[] files = null;
+                String paths = p.getProperty(k + "files");
+                if (paths != null) {
+                    String[] two = paths.split("\\|");
+                    files = new File[]{new File(two[0]), new File(two[1])};
+                    if (!files[0].exists() || !files[1].exists()) continue;
+                }
+                Item i = new Item(p.getProperty(k + "name"), p.getProperty(k + "take"), v[0], v[1], v[2], v[3], numbers(p.getProperty(k + "mid")), numbers(p.getProperty(k + "side")), bars, files);
+                String[] flags = p.getProperty(k + "flags").split(",");
+                i.saved = Boolean.parseBoolean(flags[0]);
+                i.earlier = Boolean.parseBoolean(flags[1]);
+                i.verdict = p.getProperty(k + "verdict", "");
+                i.streaming = p.getProperty(k + "streaming", "");
+                i.notes = p.getProperty(k + "notes", "");
+                String report = p.getProperty(k + "report");
+                if (report != null) {
+                    double[] r = numbers(report);
+                    i.report = new Distortion.Report();
+                    i.report.audible = (int) r[0]; i.report.borderline = (int) r[1]; i.report.worstDb = r[2];
+                    for (String s : p.getProperty(k + "spots", "").split(";")) {
+                        if (s.isEmpty()) continue;
+                        String[] x = s.split(",");
+                        Distortion.Spot spot = new Distortion.Spot();
+                        spot.startSeconds = Double.parseDouble(x[0]); spot.endSeconds = Double.parseDouble(x[1]);
+                        spot.scoreDb = Double.parseDouble(x[2]); spot.audible = Boolean.parseBoolean(x[3]);
+                        i.report.spots.add(spot);
+                    }
+                }
+                list.add(i);
+            }
+            if (list.isEmpty()) return;
+            player.clear();
+            for (Item i : list) player.add(new AbPlayer.Version(i.name, i.files == null ? source : i.files[0], i.lufs));
+            items.clear(); items.addAll(list);
+            order.clear();
+            for (int n = 0; n < player.size(); n++) order.add(n);
+            selected = 0;
+            player.select(0);
+            sessionDir = home;
+            song = p.getProperty("song");
+            masteredSong = song;
+            String uri = p.getProperty("uri", "");
+            songUri = uri.isEmpty() ? null : Uri.parse(uri);
+            metaNow = p.getProperty("meta", "");
+            roundLabel = p.getProperty("label", "");
+            sheet = p.getProperty("sheet", "");
+            level = Double.parseDouble(p.getProperty("level", "-14"));
+            sourceFlatPeaks = Integer.parseInt(p.getProperty("flat", "0"));
+            double[] refs = numbers(p.getProperty("refs", "NaN,NaN,NaN"));
+            refPunch = refs[0]; refWidth = refs[1]; refLow = refs[2];
+            String target = p.getProperty("target");
+            targetMid = target == null ? null : numbers(target);
+            statusNow = "Your masters from last time are still here.";
+            openCompareNext = true;
+        } catch (IOException | RuntimeException e) {
+            player.clear(); items.clear(); order.clear();
+        }
+    }
+
+    /** Stands in for Android closing the app, for the screen test. */
+    void forgetAndReload() {
+        player.clear(); items.clear(); order.clear();
+        songUri = null; song = null; masteredSong = null;
+        loadRound();
+        restore();
+    }
+
     // Reference shelf: only the measured numbers are stored ---------------------
 
     private File shelf() { return new File(app.getFilesDir(), "references_" + style.name() + ".txt"); }
@@ -1459,7 +1728,7 @@ public final class MainActivity extends Activity {
             String line;
             while ((line = r.readLine()) != null) {
                 String[] p = line.split("\\|");
-                if (p.length == 3) out.add(Listen.fromBands(numbers(p[1]), numbers(p[2])));
+                if (p.length >= 3) out.add(Listen.fromBands(numbers(p[1]), numbers(p[2]), p.length > 3 ? Double.parseDouble(p[3]) : Double.NaN));
             }
         } catch (IOException | NumberFormatException ignored) { }
         return out;
@@ -1480,9 +1749,9 @@ public final class MainActivity extends Activity {
 
     private Target currentTarget() {
         List<Listen> album = albumRecords();
-        if (!album.isEmpty()) return Target.fromReferences("Album " + albumName() + ", " + album.size() + " finished song" + (album.size() == 1 ? "" : "s"), album);
+        if (!album.isEmpty()) return Target.fromReferences("Album " + albumName() + ", " + album.size() + " finished song" + (album.size() == 1 ? "" : "s"), album, commercial);
         List<Listen> refs = shelfRecords();
-        return refs.isEmpty() ? Target.builtIn(style) : Target.fromReferences(refs.size() + " reference records", refs);
+        return refs.isEmpty() ? Target.builtIn(style, commercial) : Target.fromReferences(refs.size() + " reference records", refs, commercial);
     }
 
     private void refreshReferences() {
@@ -1673,7 +1942,7 @@ public final class MainActivity extends Activity {
                 Audio a = Decoder.open(app, uri);
                 Listen l = Listen.to(a);
                 try (PrintWriter w = new PrintWriter(new FileWriter(file, true))) {
-                    w.println(name + "|" + csv(l.midDb) + "|" + csv(l.sideDb));
+                    w.println(name + "|" + csv(l.midDb) + "|" + csv(l.sideDb) + "|" + String.format(Locale.US, "%.2f", l.punchDb));
                 }
                 main.post(() -> {
                     working = false;

@@ -19,7 +19,11 @@ makes its decisions once, and leaves the final call to level-matched listening.
 | Transformer, tape, valve | `Tone`: at 4x, at a calibrated 0 VU = -18 dBFS |
 | Check the print | `Eq.missing`: measures what the EQ really did and corrects it, then checks the low end after the chain |
 | Clip, then limit | `Stack`: 4x soft clipper takes sudden peaks only, held notes go to a true-peak limiter |
+| Clean-up | `CleanUp`: turns down narrow resonances only while they ring, and eases top-end specks that stand alone in time. Can be switched off |
+| Sections | `Sections`: finds quieter and bigger parts of the song, corrects each slightly towards the whole, and lifts the centre if it loses ground in the big parts |
+| Density | `Density`: on loud masters, eases each band's loudest moments so the limiter does less |
 | Check before delivery | `Distortion`: compares audio before and after the loudness stage, judges what was added against what the music hides, then eases clipping or level until it is clean |
+| Streaming check | `Streaming`: encodes the loudest 12 seconds to MP3 and AAC, decodes them and measures the true peak that comes back |
 | Dither and deliver | `Wav`, `Resample`, `Release`: 24-bit at source rate, 16-bit 44.1 kHz, tagged 320 kbps MP3 |
 | Decide by ear | `AbPlayer`: level-matched, gapless, optional blind test, imports a Stem Lab master |
 

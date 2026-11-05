@@ -162,6 +162,59 @@ public final class EngineChecks {
         check("Genre curves stay within reach", furthest < 5, String.format(Locale.US, "furthest from Country %.1f dB", furthest));
         check("Hip-Hop has more lows than Jazz, Electronic more top", band(Target.Style.HIP_HOP, 60) > band(Target.Style.JAZZ, 60) + 3 && band(Target.Style.ELECTRONIC, 12000) > band(Target.Style.JAZZ, 12000) + 3, "");
 
+        // Commercial: firmer moves on every genre, bigger curves only where figures exist.
+        Target soft = Target.builtIn(Target.Style.JAZZ), firm = Target.builtIn(Target.Style.JAZZ, true), plain = Target.builtIn(Target.Style.COUNTRY, true);
+        check("Commercial closes more of the gap", firm.strength() > soft.strength() && firm.reach() == 3.0, "");
+        check("Commercial keeps unsurveyed curves", java.util.Arrays.equals(plain.midDb, home.midDb), "");
+        check("Commercial grows surveyed curves", Math.abs((band2(firm, 12000) - band2(Target.builtIn(Target.Style.COUNTRY), 12000)) ) > Math.abs(band2(soft, 12000) - band2(Target.builtIn(Target.Style.COUNTRY), 12000)), "");
+
+        // Clean-up: leaves steady music alone, catches a ring, never touches the level.
+        java.util.Random rnd = new java.util.Random(4);
+        int r48 = 48000, sec = 20;
+        Audio steady = new Audio(sec * r48, r48), ringing = new Audio(sec * r48, r48);
+        double hp = 0;
+        for (int i = 0; i < sec * r48; i++) {
+            double w = rnd.nextGaussian() * 0.04;
+            hp = 0.9 * hp + 0.1 * w;
+            double sig = hp * 3 + 0.03 * Math.sin(2 * Math.PI * 220 * i / r48) + 0.02 * Math.sin(2 * Math.PI * 660 * i / r48);
+            steady.l[i] = steady.r[i] = (float) sig;
+            boolean on = (i / (r48 / 2)) % 8 == 3;
+            ringing.l[i] = ringing.r[i] = (float) (sig + (on ? 0.25 * Math.sin(2 * Math.PI * 2500 * i / r48) : 0));
+        }
+        CleanUp.Outcome quietOut = new CleanUp.Outcome(), ringOut = new CleanUp.Outcome();
+        Audio cleaned = CleanUp.apply(steady, quietOut);
+        double e = 0, er = 0;
+        for (int i = r48; i < sec * r48 - r48; i++) { double d = cleaned.l[i] - steady.l[i]; e += d * d; er += steady.l[i] * steady.l[i]; }
+        double nullDb = 10 * Math.log10(Math.max(1e-20, e) / er);
+        check("Clean-up leaves steady music alone", nullDb < -30, String.format(Locale.US, "difference %.1f dB", nullDb));
+        Audio rung = CleanUp.apply(ringing, ringOut);
+        check("Clean-up catches a ringing resonance", ringOut.resonanceMaxDb > 1.5, String.format(Locale.US, "cut %.1f dB, active %.0f%%", ringOut.resonanceMaxDb, ringOut.resonancePercent));
+        check("Clean-up keeps the length", rung.frames() == ringing.frames(), "");
+
+        // Sections: hears a clear verse and chorus, and leaves a flat song alone.
+        int r441 = 44100, parts = 60;
+        Audio shaped = new Audio(parts * r441, r441), flat = new Audio(parts * r441, r441);
+        for (int i = 0; i < parts * r441; i++) {
+            boolean big = (i / (12 * r441)) % 2 == 1;
+            double n = rnd.nextGaussian() * 0.05;
+            shaped.l[i] = (float) (n * (big ? 2.2 : 1)); shaped.r[i] = (float) (rnd.nextGaussian() * 0.05 * (big ? 2.2 : 1));
+            flat.l[i] = (float) n; flat.r[i] = (float) (rnd.nextGaussian() * 0.05);
+        }
+        check("Sections are found", Sections.find(shaped).sections >= 3, Sections.find(shaped).sections + " sections");
+        check("A flat song has no sections", !Sections.find(flat).active(), "");
+
+        // Density: adds back exactly when asked for nothing, and lowers peaks when asked.
+        Audio same = Density.apply(shaped, 0);
+        double de = 0, dsum = 0;
+        for (int i = 44100; i < shaped.frames() - 44100; i++) { double d = same.l[i] - shaped.l[i]; de += d * d; dsum += shaped.l[i] * shaped.l[i]; }
+        check("Density's split adds back exactly", 10 * Math.log10(Math.max(1e-20, de) / dsum) < -80, "");
+        check("Density lowers loud moments", Listen.punch(Density.apply(ringing, 2)) <= Listen.punch(ringing) + 0.05, "");
+
+        // Streaming: the round trip really happens and comes back at the same level.
+        Streaming.Report sr = Streaming.check(shaped);
+        check("Streaming check runs MP3 both ways", sr.lines.size() >= 2 && Math.abs(sr.lines.get(0).lufsChange) < 0.5,
+                sr.lines.isEmpty() ? "no result" : String.format(Locale.US, "%s, level change %.2f", sr.verdict(), sr.lines.get(0).lufsChange));
+
         // Previews: playback-only curves do what their names say.
         check("Phone preview loses deep bass", previewDb(Preview.Mode.PHONE, 60) < previewDb(Preview.Mode.PHONE, 1000) - 20, String.format(Locale.US, "60 Hz %.1f dB, 1 kHz %.1f dB", previewDb(Preview.Mode.PHONE, 60), previewDb(Preview.Mode.PHONE, 1000)));
         check("Phone preview keeps upper bass and top end", previewDb(Preview.Mode.PHONE, 250) > previewDb(Preview.Mode.PHONE, 1000) - 2 && previewDb(Preview.Mode.PHONE, 12000) > previewDb(Preview.Mode.PHONE, 1000) - 2,
@@ -190,6 +243,11 @@ public final class EngineChecks {
 
         System.out.println(failed == 0 ? "ALL_ENGINE_CHECKS_PASS" : failed + " CHECK(S) FAILED");
         if (failed != 0) System.exit(1);
+    }
+    static double band2(Target t, double hz) {
+        int k = 0;
+        for (int i = 0; i < 31; i++) if (Math.abs(Listen.BANDS[i] - hz) < Math.abs(Listen.BANDS[k] - hz)) k = i;
+        return tilted(t, k);
     }
     /** A curve's level at one band, lined up on 1 kHz. */
     static double tilted(Target t, int band) {

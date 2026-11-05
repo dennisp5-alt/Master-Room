@@ -64,6 +64,12 @@ public final class Engineer {
         }
     }
 
+    /** Choices that are not part of the target. */
+    public static final class Options {
+        /** Resonance control and top-end clean-up. Off leaves those two stages out. */
+        public boolean cleanUp = true;
+    }
+
     public static final class Session {
         public Listen before;
         public int sourceFlatPeaks;
@@ -88,6 +94,7 @@ public final class Engineer {
         public double seconds;
         public Distortion.Report distortion;
         public String verdict = "";
+        public Streaming.Report streaming;
     }
 
     /** Spotify asks for true peak below -2 dB on masters louder than -14 LUFS. */
@@ -100,14 +107,17 @@ public final class Engineer {
 
     /** @param askedLufs sets how hard kick and bass peaks are held: only loud masters need it */
     public static Session prepare(Audio in, Target target, double askedLufs, Progress p) {
+        return prepare(in, target, askedLufs, new Options(), p);
+    }
+
+    public static Session prepare(Audio in, Target target, double askedLufs, Options options, Progress p) {
         if (in.seconds() < 5) throw new IllegalArgumentException("That file is too short to master");
         Session s = new Session();
         s.target = target;
         p.at("Listening to the whole song", 2);
         s.before = Listen.to(in);
         if (s.before.loudness.integrated < -60) throw new IllegalArgumentException("That file is silent or nearly silent");
-        double strength = target.measured ? 0.75 : 0.6;
-        Eq.Moves m = Eq.decide(s.before, target, strength);
+        Eq.Moves m = Eq.decide(s.before, target, target.strength());
         s.moves = m;
         s.notes.add("Tone target: " + target.name);
         List<String> moves = m.describe();
@@ -126,18 +136,33 @@ public final class Engineer {
         int flat = Distortion.flatPeaks(in);
         if (flat > 0) s.notes.add("Source: " + flat + " flat-topped peaks already in the file. Mastering cannot undo these");
         s.sourceFlatPeaks = flat;
-        double limit = (target.measured ? 3.0 : 2.0) + 1.0;
+        double limit = target.reach() + 1.0;
+        Audio clean = fixed.audio;
+        if (options.cleanUp) {
+            p.at("Cleaning up resonances and swirl", 5);
+            CleanUp.Outcome c = new CleanUp.Outcome();
+            clean = CleanUp.apply(clean, c);
+            s.notes.add(String.format(Locale.US, "Resonance control: up to %.1f dB, active %.0f%% of the song. Top-end clean-up: up to %.1f dB, active %.0f%%",
+                    c.resonanceMaxDb, c.resonancePercent, c.swirlMaxDb, c.swirlPercent));
+        } else {
+            s.notes.add("Resonance control and top-end clean-up: off");
+        }
+        p.at("Finding the verses and choruses", 7);
+        Sections.Plan plan = Sections.find(clean);
+        if (plan.active()) s.notes.add(String.format(Locale.US, "Sections: %d found, big ones %.0f%% of the song. Quieter: %s. Bigger: %s. Vocal lift in big sections %+.1f dB",
+                plan.sections, plan.bigPercent, plan.quiet.describe(), plan.loud.describe(), plan.vocalDb));
+        else s.notes.add("Sections: no clear difference to work with");
         double[] wanted = intended(m);
         p.at("Linear-phase EQ, mid and side", 8);
         final double lowCut = askedLufs <= -13.5 ? 0.8 : askedLufs <= -11.5 ? 1.5 : 2.5;
-        Audio out = shape(fixed.audio, m, lowCut, s.notes, p);
+        Audio out = shape(clean, m, plan, lowCut, s.notes, p);
         Listen check = Listen.tone(out);
         for (int pass = 0; pass < 1; pass++) {
             double[] miss = Eq.missing(wanted, s.before.midDb, check.midDb, s.before.cutoffHz);
             if (Math.abs(miss[0]) < 0.3 && Math.abs(miss[1]) < 0.3 && Math.abs(miss[2]) < 0.3 && Math.abs(miss[3]) < 0.3) break;
             m.add(miss[0], miss[1], miss[2], miss[3], limit);
             p.at("Linear-phase EQ, checking the result", 11);
-            out = shape(fixed.audio, m, lowCut, null, p);
+            out = shape(clean, m, plan, lowCut, null, p);
             check = Listen.tone(out);
         }
         s.notes.add("Applied after checking the result: " + String.join(", ", m.describe()));
@@ -153,7 +178,7 @@ public final class Engineer {
     }
 
     /** EQ and the corrective dynamics, from the repaired audio. */
-    private static Audio shape(Audio in, Eq.Moves m, double lowCut, List<String> notes, Progress p) {
+    private static Audio shape(Audio in, Eq.Moves m, Sections.Plan plan, double lowCut, List<String> notes, Progress p) {
         float[] mid = new float[in.frames()], side = new float[in.frames()];
         for (int i = 0; i < mid.length; i++) { mid[i] = (in.l[i] + in.r[i]) * 0.5f; side[i] = (in.l[i] - in.r[i]) * 0.5f; }
         final double subsonic = 22, mono = m.monoBelowHz;
@@ -162,6 +187,7 @@ public final class Engineer {
                 * (mono > 0 ? high(hz, mono) * 0.97 + 0.03 : 1);
         mid = new FirFilter(midCurve, 16384, in.rate).apply(mid);
         side = new FirFilter(sideCurve, 16384, in.rate).apply(side);
+        Sections.apply(mid, side, in.rate, plan);
 
         p.at("Taming harsh and boomy moments", 14);
         DynamicBand.Outcome harsh = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Harshness", 2500, 6000, 2.5, 0.6, 3.0, -22, true));
@@ -204,6 +230,12 @@ public final class Engineer {
         double needed = askedLufs - Loudness.measure(a).integrated + robustPeak(a) - r.ceilingDb;
         double spare = needed - take.maxClipDb - 3.0;
         double compress = Math.min(2.5, take.compressDb + Math.max(0, spare) * 0.4);
+        // Records that hit harder than this will end up get a lighter hand, denser ones a firmer one.
+        double aim = s.target.punchDb - (Listen.punch(a) - 1.0);
+        if (!Double.isNaN(aim)) {
+            compress = Math.max(0, Math.min(2.5, compress * Math.max(0.5, Math.min(1.5, 1 - aim * 0.25))));
+            r.notes.add(String.format(Locale.US, "Punch: bus compressor set to %.1f dB to suit your records", compress));
+        }
         double cap = 2.0 + compress;
         p.at(take.label + ": bus compressor", 28);
         VariMu.Outcome vm = VariMu.apply(a, compress, cap, take.attackMs, 180, 1400);
@@ -216,6 +248,16 @@ public final class Engineer {
             final Audio src = a;
             a = Oversample.run4x(src, rate -> new Tone(rate, op, take.valve, take.iron, take.tape));
             r.stages.add(new Point("Analog colour", a));
+        }
+
+        // The check below still compares against the audio from before this stage.
+        Audio beforeDensity = a;
+        double density = densityFor(askedLufs);
+        if (density > 0) {
+            p.at(take.label + ": adding density", 52);
+            a = Density.apply(a, density);
+            r.stages.add(new Point("Density", a));
+            r.notes.add(String.format(Locale.US, "Density: top %.1f dB softened band by band", density));
         }
 
         p.at(take.label + ": finding the level", 60);
@@ -236,6 +278,7 @@ public final class Engineer {
             FirFilter.Curve curve = hz -> Math.pow(10, fix.midDb(hz) / 20);
             FirFilter f = new FirFilter(curve, 16384, pre.rate);
             pre = new Audio(f.apply(pre.l), f.apply(pre.r), pre.rate);
+            beforeDensity = density > 0 ? new Audio(f.apply(beforeDensity.l), f.apply(beforeDensity.r), pre.rate) : pre;
             r.notes.add(String.format(Locale.US, "Low end put back after the chain: %+.1f dB lows, %+.1f dB low mids", lowFix, midFix));
             preLoud = Loudness.measure(pre);
             robust = robustPeak(pre);
@@ -258,7 +301,7 @@ public final class Engineer {
             lastGain = gain; lastGot = now.lufs;
             gain = Math.min(level.most, gain + Math.max(-2, Math.min(2, err / slope)));
         }
-        best = cleanUp(best, pre, preLoud, gain, level.most, robust, usedCeiling, askedLufs, take, r, p);
+        best = cleanUp(best, pre, beforeDensity, preLoud, gain, level.most, robust, usedCeiling, askedLufs, take, r, p);
         Audio master = best.audio;
         Repair.edges(master);
         double over = Oversample.truePeakDb(master) - r.ceilingDb;
@@ -278,6 +321,9 @@ public final class Engineer {
             r.notes.add("This level is heavy work for this song. Compare it with a quieter version by ear");
         if (Math.abs(r.after.loudness.integrated - askedLufs) > 0.15)
             r.notes.add(String.format(Locale.US, "Asked for %.1f LUFS, stopped at %.1f to stay clean", askedLufs, r.after.loudness.integrated));
+        p.at(take.label + ": checking for streaming", 98);
+        r.streaming = Streaming.check(master);
+        r.notes.add("Streaming check: " + r.streaming.verdict());
         r.seconds = (System.nanoTime() - t0) / 1e9;
         return r;
     }
@@ -333,12 +379,12 @@ public final class Engineer {
      * back at those moments and the limiter takes over. If that is not enough, the take
      * comes down a little in level, because a clean master matters more than the number.
      */
-    private static Rendered cleanUp(Rendered first, Audio pre, Loudness.Result preLoud, double startGain, double most, double robust, double ceiling,
+    private static Rendered cleanUp(Rendered first, Audio pre, Audio reference, Loudness.Result preLoud, double startGain, double most, double robust, double ceiling,
                                     double asked, Recipe take, Result r, Progress p) {
         p.at(take.label + ": checking for distortion", 88);
         Rendered best = first;
         double gain = startGain;
-        Distortion.Report report = Distortion.check(pre.gained(gain), best.audio);
+        Distortion.Report report = Distortion.check(reference.gained(gain), best.audio);
         final int found = report.audible;
         float[] calm = null;
         for (int round = 0; round < 3 && !report.passed(); round++) {
@@ -350,7 +396,7 @@ public final class Engineer {
                 tryGain = Math.min(most, tryGain + Math.min(0.6, (asked - now.lufs) / 0.6));
                 now = render(pre, preLoud, tryGain, robust, ceiling, take, true, calm);
             }
-            Distortion.Report again = Distortion.check(pre.gained(tryGain), now.audio);
+            Distortion.Report again = Distortion.check(reference.gained(tryGain), now.audio);
             // Giving up level is only worth it if it actually removes spots.
             if (again.audible >= report.audible && round > 0) break;
             best = now;
@@ -378,6 +424,12 @@ public final class Engineer {
         r.audio = out; r.stats = holder[0].stats;
         r.lufs = Loudness.measure(out).integrated;
         return r;
+    }
+
+    private static double densityFor(double askedLufs) {
+        String test = System.getProperty("density");
+        if (test != null) return Double.parseDouble(test);
+        return askedLufs < -11.5 ? 0 : askedLufs < -10.5 ? 1.5 : 2.0;
     }
 
     /** Past this average, limiting flattens the song, so a take stops short of its target. */

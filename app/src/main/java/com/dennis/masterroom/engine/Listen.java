@@ -13,6 +13,8 @@ public final class Listen {
     public double robustPeakDb;
     /** Power density of mid and side per band, loud passages only (dB). */
     public double[] midDb, sideDb;
+    /** How far peaks stand above the music around them, typical moment (dB). */
+    public double punchDb = Double.NaN;
     /** Highest frequency with real content. */
     public double cutoffHz;
     /** Side level relative to mid below 120 Hz (dB). */
@@ -38,8 +40,46 @@ public final class Listen {
         out.peakDb = db(peak);
         out.crestDb = out.peakDb - 10 * Math.log10(Math.max(1e-20, rms / Math.max(1, 2 * frames)));
         out.robustPeakDb = robustPeak(a);
+        out.punchDb = punch(a);
         spectrum(a, out);
         return out;
+    }
+
+    /** Median of peak over level across 400 ms blocks, skipping the quiet ones. */
+    static double punch(Audio a) {
+        int block = (int) (a.rate * 0.4), n = a.frames() / Math.max(1, block);
+        if (n == 0) return Double.NaN;
+        double[] level = new double[n], crest = new double[n];
+        for (int b = 0; b < n; b++) {
+            double e = 0, top = 0;
+            for (int i = b * block; i < (b + 1) * block; i++) {
+                double x = a.l[i], y = a.r[i];
+                e += x * x + y * y;
+                top = Math.max(top, Math.max(Math.abs(x), Math.abs(y)));
+            }
+            level[b] = 10 * Math.log10(Math.max(1e-14, e / (2 * block)));
+            crest[b] = db(top) - level[b];
+        }
+        double[] sorted = level.clone();
+        Arrays.sort(sorted);
+        double gate = sorted[(int) (n * 0.9)] - 8;
+        int c = 0;
+        double[] kept = new double[n];
+        for (int b = 0; b < n; b++) if (level[b] >= gate) kept[c++] = crest[b];
+        Arrays.sort(kept, 0, c);
+        return kept[c / 2];
+    }
+
+    /** Average side level against mid across the main of the music (dB). */
+    public double widthDb() { return span(sideDb, 300, 6000) - span(midDb, 300, 6000); }
+
+    /** Lows against the centre of the music (dB). */
+    public double lowEndDb() { return span(midDb, 40, 120) - span(midDb, 150, 3000); }
+
+    private static double span(double[] bands, double from, double to) {
+        double sum = 0; int c = 0;
+        for (int i = 0; i < 31; i++) if (BANDS[i] >= from && BANDS[i] <= to) { sum += bands[i]; c++; }
+        return sum / Math.max(1, c);
     }
 
     /** Just the tone and loudness of a work in progress, for the engine's own checks. */
@@ -51,9 +91,11 @@ public final class Listen {
     }
 
     /** A reference record that has already been measured; the audio itself is not kept. */
-    public static Listen fromBands(double[] midDb, double[] sideDb) {
+    public static Listen fromBands(double[] midDb, double[] sideDb) { return fromBands(midDb, sideDb, Double.NaN); }
+
+    public static Listen fromBands(double[] midDb, double[] sideDb, double punchDb) {
         Listen out = new Listen();
-        out.midDb = midDb; out.sideDb = sideDb;
+        out.midDb = midDb; out.sideDb = sideDb; out.punchDb = punchDb;
         return out;
     }
 
