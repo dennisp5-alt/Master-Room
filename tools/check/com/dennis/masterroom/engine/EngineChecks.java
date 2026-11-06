@@ -269,6 +269,7 @@ public final class EngineChecks {
         Engineer.Recipe mine = Taste.yours(log, "COUNTRY");
         check("Yours take leans to what you pick", mine != null && Math.abs(mine.valve - 0.49) < 0.02, mine == null ? "none" : String.format(Locale.US, "valve %.2f", mine.valve));
 
+        try { stems(); } catch (Exception problem) { check("Stems", false, String.valueOf(problem)); }
         System.out.println(failed == 0 ? "ALL_ENGINE_CHECKS_PASS" : failed + " CHECK(S) FAILED");
         if (failed != 0) System.exit(1);
     }
@@ -326,6 +327,88 @@ public final class EngineChecks {
         double p = 0;
         for (int i = n; i < 2 * n; i++) p += io[i] * io[i];
         return 10 * Math.log10(p / n / 0.005);
+    }
+
+    /** Four stems from one run: exact sums, muting, levels, and treatment left where it belongs. */
+    static void stems() throws Exception {
+        check("Stem names", Stems.partOf("My_Song_Vocals_24bit.wav") == Stems.VOCALS && Stems.partOf("Other_Side_Drums_24bit.wav") == Stems.DRUMS
+                && Stems.partOf("Bass_Line_Other_24bit.wav") == Stems.OTHER && Stems.partOf("x_Bass_24bit.wav") == Stems.BASS && Stems.partOf("song.wav") < 0, "");
+        check("Stem title", "Other_Side".equals(Stems.titleOf("Other_Side_Drums_24bit.wav")) && "Stems".equals(Stems.titleOf("Vocals.wav")), "");
+        java.io.File dir = java.nio.file.Files.createTempDirectory("stems").toFile();
+        int rate = 48000, n = 8 * rate;
+        Random q = new Random(9);
+        Audio[] parts = new Audio[Stems.COUNT];
+        java.io.File[] files = new java.io.File[Stems.COUNT];
+        for (int p = 0; p < Stems.COUNT; p++) {
+            parts[p] = new Audio(n, rate);
+            double hz = 110 * (p + 1), amount = 0.1 + 0.03 * p;
+            for (int i = 0; i < n; i++) {
+                double w = amount * Math.sin(2 * Math.PI * hz * i / rate) * (1 + 0.5 * Math.sin(2 * Math.PI * 2 * i / rate));
+                parts[p].l[i] = (float) (w + 0.01 * q.nextGaussian());
+                parts[p].r[i] = (float) (w * 0.8 + 0.01 * q.nextGaussian());
+            }
+            files[p] = new java.io.File(dir, Stems.NAMES[p] + ".wav");
+            Wav.write(files[p], parts[p], 24);
+        }
+        Stems.Set set = Stems.open(files);
+        check("Stems line up", set.frames == n && set.rate == rate, set.frames + " frames");
+        Audio flat = Stems.mix(set, null, null);
+        double worst = 0;
+        for (int i = 0; i < n; i++) worst = Math.max(worst, Math.abs(flat.l[i] - parts[0].l[i] - parts[1].l[i] - parts[2].l[i] - parts[3].l[i]));
+        check("Flat stems sum exactly", worst < 3e-6, String.format(Locale.US, "off by %.1e", worst));
+        double[] up = {6, 0, 0, 0};
+        boolean[] none = new boolean[Stems.COUNT], mute = {false, true, false, false};
+        Audio moved = Stems.mix(set, up, mute);
+        worst = 0;
+        double g = Math.pow(10, 6.0 / 20);
+        for (int i = 0; i < n; i++) worst = Math.max(worst, Math.abs(moved.l[i] - parts[0].l[i] * g - parts[2].l[i] - parts[3].l[i]));
+        check("Level and mute reach the mix", worst < 5e-6, String.format(Locale.US, "off by %.1e", worst));
+
+        // The drums and bass must come through treatment untouched.
+        java.util.List<String> notes = new java.util.ArrayList<>();
+        boolean[] onlyDrumsBass = {true, false, false, true};
+        Audio kept = Stems.render(set, new double[Stems.COUNT], onlyDrumsBass, true, dir, notes, (s, p) -> { });
+        worst = 0;
+        for (int i = 0; i < n; i++) worst = Math.max(worst, Math.abs(kept.l[i] - parts[1].l[i] - parts[2].l[i]));
+        check("Drums and bass stay untreated", worst < 3e-6, String.format(Locale.US, "off by %.1e", worst));
+        boolean refused = false;
+        try { Stems.render(set, new double[Stems.COUNT], new boolean[]{true, true, true, true}, true, dir, notes, (s, p) -> { }); }
+        catch (java.io.IOException e) { refused = true; }
+        check("All muted is refused", refused, "");
+        check("No temporary stems left", new java.io.File(dir, "stem0.raw").exists() == false && new java.io.File(dir, "stem3.raw").exists() == false, "");
+
+        Audio[] shorter = {new Audio(n - rate, rate)};
+        java.io.File wrong = new java.io.File(dir, "short.wav");
+        Wav.write(wrong, shorter[0], 24);
+        files = files.clone();
+        files[2] = wrong;
+        refused = false;
+        try { Stems.open(files); } catch (java.io.IOException e) { refused = true; }
+        check("Stems of different lengths are refused", refused, "");
+
+        // The chain with stems skips only the stages already done on them.
+        Engineer.Options o = new Engineer.Options();
+        o.fromStems = true;
+        notes.clear();
+        Audio mixed = Stems.render(Stems.open(new java.io.File[]{new java.io.File(dir, "Vocals.wav"), new java.io.File(dir, "Drums.wav"), new java.io.File(dir, "Bass.wav"), new java.io.File(dir, "Other.wav")}),
+                new double[Stems.COUNT], none, true, dir, o.stemNotes, (s, p) -> { });
+        Audio[] hand = {mixed};
+        Engineer.Session s = Engineer.prepare(hand, Target.builtIn(Target.Style.ROCK), -14, o, (x, y) -> { });
+        boolean said = false, doubled = false;
+        for (String line : s.notes) { said |= line.startsWith("Vocals stem:"); doubled |= line.startsWith("Harshness:") || line.startsWith("Resonance control"); }
+        check("Stem notes reach the session, no second pass", said && !doubled, "");
+        s.release();
+        for (java.io.File f : dir.listFiles()) f.delete();
+        dir.delete();
+
+        // Live meter against the whole-file measure, on a steady tone.
+        Audio tone = sine(1000, -20, 3, rate, 0);
+        float[] both = new float[tone.frames() * 2];
+        for (int i = 0; i < tone.frames(); i++) { both[2 * i] = tone.l[i]; both[2 * i + 1] = tone.r[i]; }
+        Loudness.Live live = new Loudness.Live(rate);
+        live.add(both, tone.frames());
+        double wanted = Loudness.measure(tone).integrated;
+        check("Live loudness matches the measure", Math.abs(live.lufs() - wanted) < 0.1, String.format(Locale.US, "%.2f vs %.2f", live.lufs(), wanted));
     }
 
     static boolean refused(Audio a) {

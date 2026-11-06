@@ -6,13 +6,30 @@ import java.util.*;
 public final class Cli {
     public static void main(String[] a) throws Exception {
         long t0 = System.nanoTime();
-        Audio[] hand = {Wav.read(new File(a[0]))};
         File dir = new File(a[1]); dir.mkdirs();
+        String stems = System.getProperty("stems");
+        Engineer.Options o = new Engineer.Options();
+        o.cleanUp = System.getProperty("cleanup") == null;
+        Audio[] hand = {null};
+        if (stems == null) hand[0] = Wav.read(new File(a[0]));
+        else {
+            // -Dstems=folder holding the four files, -Dlevels=v,d,b,o in dB, -Dmute=0,0,0,0
+            File[] files = new File[Stems.COUNT];
+            for (File f : new File(stems).listFiles()) { int p = Stems.partOf(f.getName()); if (p >= 0) files[p] = f; }
+            double[] levels = new double[Stems.COUNT];
+            boolean[] muted = new boolean[Stems.COUNT];
+            String[] v = System.getProperty("levels", "0,0,0,0").split(","), m = System.getProperty("mute", "0,0,0,0").split(",");
+            for (int i = 0; i < Stems.COUNT; i++) { levels[i] = Double.parseDouble(v[i]); muted[i] = m[i].equals("1"); }
+            Stems.Set set = Stems.open(files);
+            if (System.getProperty("flat") != null) {
+                Wav.write(new File(dir, "flat.wav"), Stems.mix(set, null, null), 24);
+            }
+            o.fromStems = true;
+            hand[0] = Stems.render(set, levels, muted, o.cleanUp, dir, o.stemNotes, (s, n) -> {});
+        }
         double lufs = Double.parseDouble(a[2]);
         Target.Style style = a.length > 3 ? Target.Style.valueOf(a[3]) : Target.Style.COUNTRY;
         Engineer.Progress p = (s, n) -> {};
-        Engineer.Options o = new Engineer.Options();
-        o.cleanUp = System.getProperty("cleanup") == null;
         Engineer.Session s = Engineer.prepare(hand, Target.builtIn(style, System.getProperty("commercial") != null), lufs, o, p);
         System.out.printf(Locale.US, "IN %.2f LUFS LRA %.1f TP %.2f crest %.1f cutoff %.0f lowSide %.1f%n",
                 s.before.loudness.integrated, s.before.loudness.lra, s.before.truePeakDb, s.before.crestDb, s.before.cutoffHz, s.before.lowSideDb);

@@ -32,7 +32,8 @@ jobs:
           javac -nowarn -cp build/host -d build/host tools/MemoryCheck.java
           java -Xmx300m -Xmn8m -XX:+UseSerialGC -cp build/host MemoryCheck -14 | tee memory.txt
           java -Xmx300m -Xmn8m -XX:+UseSerialGC -cp build/host MemoryCheck -10 | tee -a memory.txt
-          test "$(grep -c MEMORY_CHECK_PASS memory.txt)" = 2
+          java -Xmx300m -Xmn8m -XX:+UseSerialGC -cp build/host MemoryCheck -14 stems | tee -a memory.txt
+          test "$(grep -c MEMORY_CHECK_PASS memory.txt)" = 3
       - name: Fetch fonts
         run: bash tools/fetch_fonts.sh
       - name: Build APK

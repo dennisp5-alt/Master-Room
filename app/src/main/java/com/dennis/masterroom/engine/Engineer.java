@@ -69,6 +69,10 @@ public final class Engineer {
     public static final class Options {
         /** Resonance control and top-end clean-up. Off leaves those two stages out. */
         public boolean cleanUp = true;
+        /** The vocals and the rest were already treated on their own, so the mix is left alone. */
+        public boolean fromStems;
+        /** What was done to the stems, for the session sheet. */
+        public final List<String> stemNotes = new ArrayList<>();
     }
 
     public static final class Session {
@@ -180,7 +184,9 @@ public final class Engineer {
             s.noise = noise.describe() + (noise.found() ? ". Left in, because Clean-up is off" : "");
         }
         s.notes.add(s.noise);
-        if (options.cleanUp) {
+        if (options.fromStems) {
+            s.notes.addAll(options.stemNotes);
+        } else if (options.cleanUp) {
             p.at("Cleaning up resonances and swirl", 5);
             CleanUp.Outcome c = new CleanUp.Outcome();
             clean = CleanUp.apply(clean, c);
@@ -197,7 +203,7 @@ public final class Engineer {
         double[] wanted = intended(m);
         p.at("Linear-phase EQ, mid and side", 8);
         final double lowCut = askedLufs <= -13.5 ? 0.8 : askedLufs <= -11.5 ? 1.5 : 2.5;
-        Audio out = shape(clean, m, plan, lowCut, s.notes, p);
+        Audio out = shape(clean, m, plan, lowCut, options.fromStems, s.notes, p);
         Listen check = Listen.tone(out);
         for (int pass = 0; pass < 1; pass++) {
             double[] miss = Eq.missing(wanted, s.before.midDb, check.midDb, s.before.cutoffHz);
@@ -205,7 +211,7 @@ public final class Engineer {
             m.add(miss[0], miss[1], miss[2], miss[3], limit);
             p.at("Linear-phase EQ, checking the result", 11);
             out = null;
-            out = shape(clean, m, plan, lowCut, null, p);
+            out = shape(clean, m, plan, lowCut, options.fromStems, null, p);
             check = Listen.tone(out);
         }
         s.notes.add("Applied after checking the result: " + String.join(", ", m.describe()));
@@ -221,7 +227,7 @@ public final class Engineer {
     }
 
     /** EQ and the corrective dynamics, from the repaired audio. */
-    private static Audio shape(Audio in, Eq.Moves m, Sections.Plan plan, double lowCut, List<String> notes, Progress p) {
+    private static Audio shape(Audio in, Eq.Moves m, Sections.Plan plan, double lowCut, boolean fromStems, List<String> notes, Progress p) {
         float[] mid = new float[in.frames()], side = new float[in.frames()];
         for (int i = 0; i < mid.length; i++) { mid[i] = (in.l[i] + in.r[i]) * 0.5f; side[i] = (in.l[i] - in.r[i]) * 0.5f; }
         final double subsonic = 22, mono = m.monoBelowHz;
@@ -239,10 +245,11 @@ public final class Engineer {
         }
 
         p.at("Taming harsh and boomy moments", 14);
-        DynamicBand.Outcome harsh = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Harshness", 2500, 6000, 2.5, 0.6, 3.0, -22, true));
-        DynamicBand.Outcome sib = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Sibilance", 6000, 11000, 4.0, 0.6, 4.0, -26, true));
+        DynamicBand.Outcome harsh = fromStems ? null : DynamicBand.apply(mid, in.rate, DynamicBand.harshness());
+        DynamicBand.Outcome sib = fromStems ? null : DynamicBand.apply(mid, in.rate, DynamicBand.sibilance());
         DynamicBand.Outcome low = DynamicBand.apply(mid, in.rate, new DynamicBand.Settings("Low end", 0, 130, 3.0, 0.5, lowCut, -14, false));
-        if (notes != null) notes.add(String.format(Locale.US, "Harshness: up to %.1f dB on %.1f%% of the song. Sibilance: up to %.1f dB on %.1f%%. Kick and bass peaks: up to %.1f dB on %.1f%%",
+        if (notes != null && fromStems) notes.add(String.format(Locale.US, "Kick and bass peaks: up to %.1f dB on %.1f%%", low.maxCutDb, low.activePercent));
+        else if (notes != null) notes.add(String.format(Locale.US, "Harshness: up to %.1f dB on %.1f%% of the song. Sibilance: up to %.1f dB on %.1f%%. Kick and bass peaks: up to %.1f dB on %.1f%%",
                 harsh.maxCutDb, harsh.activePercent, sib.maxCutDb, sib.activePercent, low.maxCutDb, low.activePercent));
         // Left and right take over the mid and side arrays, so no third copy is needed.
         for (int i = 0; i < mid.length; i++) {

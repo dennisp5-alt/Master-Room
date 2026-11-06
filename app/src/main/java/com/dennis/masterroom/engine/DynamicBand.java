@@ -15,6 +15,11 @@ final class DynamicBand {
 
     static final class Outcome { double maxCutDb, activePercent; }
 
+    /** Harsh moments in the presence range, measured against the rest of the sound. */
+    static Settings harshness() { return new Settings("Harshness", 2500, 6000, 2.5, 0.6, 3.0, -22, true); }
+    /** Sharp esses. */
+    static Settings sibilance() { return new Settings("Sibilance", 6000, 11000, 4.0, 0.6, 4.0, -26, true); }
+
     static Outcome apply(float[] mid, int rate, Settings s) {
         final double from = s.fromHz, to = s.toHz;
         FirFilter split = new FirFilter(hz -> {

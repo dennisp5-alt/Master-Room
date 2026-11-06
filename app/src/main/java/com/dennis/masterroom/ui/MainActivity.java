@@ -30,6 +30,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -41,6 +42,7 @@ import com.dennis.masterroom.engine.Listen;
 import com.dennis.masterroom.engine.Preview;
 import com.dennis.masterroom.engine.Release;
 import com.dennis.masterroom.engine.Spectrum;
+import com.dennis.masterroom.engine.Stems;
 import com.dennis.masterroom.engine.Streaming;
 import com.dennis.masterroom.engine.Target;
 import com.dennis.masterroom.engine.Taste;
@@ -66,7 +68,7 @@ import java.util.function.Consumer;
 
 /** Session screen: load, choose, master. Compare screen: listen, decide, save. */
 public final class MainActivity extends Activity {
-    private static final int PICK_SONG = 1, PICK_REFERENCE = 2, PICK_MASTER = 3;
+    private static final int PICK_SONG = 1, PICK_REFERENCE = 2, PICK_MASTER = 3, PICK_STEMS = 4;
     private static final int BARS = 120, BLIND_OFF = 0, BLIND_ON = 1, BLIND_RESULTS = 2;
     private static final double[] LEVELS = {-14, -12, -11, -10};
     private static final String[] STAGES = {"EQ", "DYN", "COMP", "TONE", "CLIP", "LIMIT"};
@@ -151,6 +153,17 @@ public final class MainActivity extends Activity {
     private static float[] songLevels;
     private static int songRate = 48000;
     private static int sourceFlatPeaks;
+    /** Four stems stand in for a song when these are set. */
+    private static Stems.Set stemSet;
+    private static final double[] stemDb = new double[Stems.COUNT];
+    private static final boolean[] stemMute = new boolean[Stems.COUNT], stemSolo = new boolean[Stems.COUNT];
+    private static StemPlayer stemPlayer;
+    private static double stemFrom;
+    private static boolean stemBusy, stemSeeking;
+    private LinearLayout stemRows, stemTransport;
+    private TextView stemHint, stemTime;
+    private Button stemLoad;
+    private SeekBar stemSeek;
 
     /** Runs on the screen that is showing now, if there is one. */
     private static void ui(Consumer<MainActivity> job) {
@@ -204,13 +217,16 @@ public final class MainActivity extends Activity {
         refreshCeiling();
         drawStrength();
         if (items.isEmpty() && !working) loadRound();
+        if (stemSet == null && !working) restoreStems();
+        drawStems();
         restore();
+        if (stemSet != null && measuredNow == null && !working) measureStems();
         main.postDelayed(this::tick, 100);
     }
 
     /** Puts the screen back to wherever the session has got to. */
     private void restore() {
-        if (songUri != null) {
+        if (hasSource()) {
             songName.setText(song);
             songMeta.setText(metaNow);
             songAction.setText("Change");
@@ -322,6 +338,7 @@ public final class MainActivity extends Activity {
         songAction.setMinWidth(Look.dp(48));
         songCard.addView(songAction, new LinearLayout.LayoutParams(Look.dp(58), Look.dp(48)));
         column.addView(songCard, Parts.line(Parts.WRAP, 7));
+        buildStems();
 
         // One calibrated monitor with real numerical results, not three oversized cards.
         LinearLayout monitor = parts.panel(8, column);
@@ -558,6 +575,323 @@ public final class MainActivity extends Activity {
         if (open) main.postDelayed(this::showSettings, 80);
     }
 
+    private static boolean hasSource() { return songUri != null || stemSet != null; }
+
+    // Stems ------------------------------------------------------------------
+
+    private void buildStems() {
+        LinearLayout box = parts.panel(8, column);
+        LinearLayout head = parts.row();
+        head.addView(parts.label("STEMS"));
+        head.addView(parts.grow());
+        stemLoad = parts.link("LOAD 4 STEMS", v -> stemAction());
+        Look.type(stemLoad, Look.label, 13, Look.AMBER);
+        head.addView(stemLoad, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
+        box.addView(head);
+        stemHint = parts.text("", Look.body, 11, Look.DIM);
+        box.addView(stemHint);
+        stemRows = new LinearLayout(this);
+        stemRows.setOrientation(LinearLayout.VERTICAL);
+        box.addView(stemRows, Parts.line(Parts.WRAP, 5));
+        stemTransport = parts.row();
+        stemSeek = new SeekBar(this);
+        stemSeek.setMax(1000);
+        stemSeek.setProgressTintList(ColorStateList.valueOf(Look.AMBER));
+        stemSeek.setThumbTintList(ColorStateList.valueOf(Look.AMBER));
+        stemSeek.setContentDescription("Position in the stems");
+        stemSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar b, int value, boolean byUser) {
+                if (byUser && stemSet != null) stemTime.setText(clock(value / 1000.0 * stemSet.seconds()) + " / " + clock(stemSet.seconds()));
+            }
+            @Override public void onStartTrackingTouch(SeekBar b) { stemSeeking = true; }
+            @Override public void onStopTrackingTouch(SeekBar b) {
+                stemSeeking = false;
+                stemFrom = b.getProgress() / 1000.0;
+                if (stemPlayer != null) stemPlayer.seekTo(stemFrom);
+            }
+        });
+        stemTransport.addView(stemSeek, new LinearLayout.LayoutParams(0, Look.dp(48), 1));
+        stemTime = parts.text("", Look.mono, 11, Look.DIM);
+        stemTransport.addView(stemTime);
+        box.addView(stemTransport);
+    }
+
+    private void stemAction() {
+        if (working || stemBusy) return;
+        if (stemSet == null) { pick(PICK_STEMS); return; }
+        clearStems();
+        song = "song";
+        songName.setText("No song loaded");
+        songAction.setText("Load");
+        setMeta("Choose an audio file");
+        clearMeasured();
+        measuredNow = null;
+        Look.enable(masterButton, false);
+    }
+
+    /** Back to working from a song. The copied stems go, as they are large. */
+    private void clearStems() {
+        stopSong();
+        stemSet = null;
+        stemFrom = 0;
+        getSharedPreferences("choices", MODE_PRIVATE).edit().remove("stems").remove("stemDb").remove("stemMute").apply();
+        worker.execute(() -> deleteAll(new File(app.getExternalFilesDir(null), "stems")));
+        drawStems();
+    }
+
+    private void drawStems() {
+        boolean on = stemSet != null;
+        stemLoad.setText(on ? "CLEAR" : "LOAD 4 STEMS");
+        stemHint.setText(on ? "Vocals and other instruments are cleaned on their own. Drums and bass are left alone. Small moves work best, as each stem holds traces of the others."
+                : "Use the files from Stem Studio: its ZIP, or all four WAVs.");
+        stemRows.removeAllViews();
+        stemRows.setVisibility(on ? View.VISIBLE : View.GONE);
+        stemTransport.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (!on) return;
+        stemTime.setText(clock(stemFrom * stemSet.seconds()) + " / " + clock(stemSet.seconds()));
+        stemSeek.setProgress((int) (stemFrom * 1000));
+        for (int i = 0; i < Stems.COUNT; i++) stemRows.addView(stemRow(i), Parts.line(Look.dp(50), 0));
+    }
+
+    private LinearLayout stemRow(int part) {
+        final String name = Stems.NAMES[part];
+        LinearLayout row = parts.row();
+        TextView label = parts.text(name, Look.strong, 13, stemMute[part] ? Look.DIM : Look.TEXT);
+        label.setSingleLine(true);
+        row.addView(label, new LinearLayout.LayoutParams(0, Parts.WRAP, 1));
+        row.addView(stemKey("S", name + " solo, for listening only", stemSolo[part], v -> {
+            stemSolo[part] = !stemSolo[part];
+            stemsChanged();
+        }));
+        row.addView(stemKey("M", "Mute " + name + ", also in the master", stemMute[part], v -> {
+            stemMute[part] = !stemMute[part];
+            stemsChanged();
+        }));
+        row.addView(stemKey("\u2212", name + " down", false, v -> stemNudge(part, -0.5)));
+        Button value = parts.link(String.format(Locale.US, "%+.1f", stemDb[part]), v -> {
+            stemDb[part] = 0;
+            stemsChanged();
+        });
+        Look.type(value, Look.mono, 12, Look.AMBER);
+        value.setLetterSpacing(0);
+        value.setPadding(0, 0, 0, 0);
+        value.setContentDescription(name + " level in dB. Tap to reset");
+        row.addView(value, new LinearLayout.LayoutParams(Look.dp(48), Look.dp(48)));
+        row.addView(stemKey("+", name + " up", false, v -> stemNudge(part, 0.5)));
+        return row;
+    }
+
+    private Button stemKey(String text, String description, boolean on, View.OnClickListener click) {
+        Button b = parts.segment(text, on, Look.strong, click);
+        b.setPadding(0, 0, 0, 0);
+        b.setContentDescription(description);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(Look.dp(48), Look.dp(48));
+        p.leftMargin = Look.dp(2);
+        b.setLayoutParams(p);
+        return b;
+    }
+
+    private void stemNudge(int part, double db) {
+        stemDb[part] = Math.max(-Stems.REACH_DB, Math.min(Stems.REACH_DB, stemDb[part] + db));
+        stemsChanged();
+    }
+
+    private void stemsChanged() {
+        keepStems();
+        if (stemPlayer != null) stemPlayer.setGains(stemGains());
+        drawStems();
+    }
+
+    private static void keepStems() {
+        StringBuilder db = new StringBuilder(), mute = new StringBuilder();
+        for (int i = 0; i < Stems.COUNT; i++) {
+            db.append(i == 0 ? "" : ",").append(stemDb[i]);
+            mute.append(stemMute[i] ? '1' : '0');
+        }
+        app.getSharedPreferences("choices", MODE_PRIVATE).edit().putString("stems", song)
+                .putString("stemDb", db.toString()).putString("stemMute", mute.toString()).apply();
+    }
+
+    /** Stems survive the app closing, with their balance. */
+    private void restoreStems() {
+        SharedPreferences p = getSharedPreferences("choices", MODE_PRIVATE);
+        String title = p.getString("stems", null);
+        if (title == null) return;
+        try {
+            stemSet = Stems.open(stemFiles(new File(app.getExternalFilesDir(null), "stems")));
+            String[] db = p.getString("stemDb", "0,0,0,0").split(",");
+            String mute = p.getString("stemMute", "0000");
+            for (int i = 0; i < Stems.COUNT; i++) { stemDb[i] = Double.parseDouble(db[i]); stemMute[i] = mute.charAt(i) == '1'; }
+            song = title;
+            songUri = null;
+            songAction.setText("Change");
+            Look.enable(masterButton, true);
+        } catch (IOException | RuntimeException e) {
+            stemSet = null;
+        }
+    }
+
+    private static File[] stemFiles(File dir) {
+        File[] files = new File[Stems.COUNT];
+        for (int i = 0; i < Stems.COUNT; i++) files[i] = new File(dir, Stems.NAMES[i] + ".wav");
+        return files;
+    }
+
+    /** What the stems should play at now. A solo silences the rest, but only while listening. */
+    private static float[] stemGains() {
+        boolean solo = false;
+        for (boolean s : stemSolo) solo |= s;
+        float[] g = new float[Stems.COUNT];
+        for (int i = 0; i < Stems.COUNT; i++) {
+            boolean heard = solo ? stemSolo[i] : !stemMute[i];
+            g[i] = heard ? (float) Math.pow(10, stemDb[i] / 20) : 0;
+        }
+        return g;
+    }
+
+    private void startStems() {
+        player.pause();
+        StemPlayer sp = new StemPlayer(stemSet, stemGains(), stemFrom, () -> main.post(() -> { stemFrom = 0; stopSong(); }));
+        stemPlayer = sp;
+        sp.start();
+        followStems();
+    }
+
+    private void followStems() {
+        songPlay.setText("STOP STEMS");
+        meter.setLive(new MeterView.Live() {
+            @Override public boolean on() { return stemPlayer != null; }
+            @Override public float light() { StemPlayer sp = stemPlayer; return sp == null ? -24 : sp.levelDb(); }
+            @Override public float lufs() { StemPlayer sp = stemPlayer; return sp == null ? Float.NaN : sp.lufs(); }
+        });
+    }
+
+    private void importStems(List<Uri> uris) {
+        if (uris.isEmpty() || working || stemBusy) return;
+        stopSong();
+        stemBusy = true;
+        status("Bringing in the stems");
+        worker.execute(() -> {
+            File base = app.getExternalFilesDir(null), fresh = new File(base, "stems_new"), home = new File(base, "stems");
+            try {
+                deleteAll(fresh);
+                fresh.mkdirs();
+                File[] files = stemFiles(fresh);
+                String[] title = {null};
+                for (Uri uri : uris) copyStems(uri, files, title);
+                for (int i = 0; i < Stems.COUNT; i++) {
+                    if (!files[i].exists()) throw new IOException("The " + Stems.NAMES[i] + " stem is missing. Pick all four, or the ZIP");
+                }
+                Stems.open(files);
+                deleteAll(home);
+                if (!fresh.renameTo(home)) throw new IOException("Could not keep the stems");
+                final Stems.Set set = Stems.open(stemFiles(home));
+                final String name = title[0];
+                main.post(() -> {
+                    stemBusy = false;
+                    stemSet = set;
+                    songUri = null;
+                    song = name;
+                    stemFrom = 0;
+                    java.util.Arrays.fill(stemDb, 0);
+                    java.util.Arrays.fill(stemMute, false);
+                    java.util.Arrays.fill(stemSolo, false);
+                    statusNow = "Stems loaded. Set the balance, then press Master It.";
+                    keepStems();
+                    ui(a -> {
+                        a.statusLine.setText(statusNow);
+                        a.songName.setText(song);
+                        a.titleField.setText(song);
+                        a.songAction.setText("Change");
+                        Look.enable(a.masterButton, true);
+                        a.resetPath(false);
+                        a.drawStems();
+                        a.measureStems();
+                    });
+                });
+            } catch (Throwable e) {
+                deleteAll(fresh);
+                final String why = e instanceof java.util.zip.ZipException ? "That ZIP could not be read" : String.valueOf(e.getMessage());
+                main.post(() -> { stemBusy = false; status(why); });
+            }
+        });
+    }
+
+    /** Copies one picked WAV, or everything useful from a picked ZIP, under plain names. */
+    private static void copyStems(Uri uri, File[] files, String[] title) throws IOException {
+        try (InputStream raw = app.getContentResolver().openInputStream(uri)) {
+            if (raw == null) throw new IOException("Could not open that file");
+            java.io.BufferedInputStream in = new java.io.BufferedInputStream(raw, 1 << 16);
+            in.mark(4);
+            int first = in.read(), second = in.read();
+            in.reset();
+            if (first == 'P' && second == 'K') {
+                java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(in);
+                java.util.zip.ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    String name = entry.getName();
+                    name = name.substring(name.lastIndexOf('/') + 1);
+                    if (entry.isDirectory() || !name.toLowerCase(Locale.US).endsWith(".wav")) continue;
+                    int part = Stems.partOf(name);
+                    if (part < 0) continue;
+                    if (title[0] == null) title[0] = Stems.titleOf(name);
+                    copyStream(zip, files[part]);
+                }
+            } else {
+                String name = displayName(uri);
+                int part = Stems.partOf(name);
+                if (part < 0) throw new IOException(name + " does not say which stem it is");
+                if (title[0] == null) title[0] = Stems.titleOf(name);
+                copyStream(in, files[part]);
+            }
+        }
+    }
+
+    private static void copyStream(InputStream in, File to) throws IOException {
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(to)) {
+            byte[] b = new byte[1 << 16];
+            int n;
+            while ((n = in.read(b)) > 0) out.write(b, 0, n);
+        }
+    }
+
+    private static String displayName(Uri uri) {
+        try (Cursor c = app.getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (i >= 0) return c.getString(i);
+            }
+        } catch (RuntimeException ignored) { }
+        String last = uri.getLastPathSegment();
+        return last == null ? "stem" : last.substring(last.lastIndexOf('/') + 1);
+    }
+
+    /** The flat sum is the song as it came, so the numbers here are the source's. */
+    private void measureStems() {
+        final int token = ++measureToken;
+        final Stems.Set set = stemSet;
+        clearMeasured();
+        measuredNow = null;
+        setMeta("Measuring");
+        Thread t = new Thread(() -> {
+            try {
+                Audio a = Stems.mix(set, null, null);
+                final String meta = trackMeta(a) + "  4 stems";
+                Listen l = Listen.to(a);
+                main.post(() -> {
+                    if (token != measureToken) return;
+                    setMeta(meta);
+                    measuredNow = l;
+                    ui(x -> x.showMeasured(l));
+                });
+            } catch (Throwable e) {
+                main.post(() -> { if (token == measureToken) setMeta("Could not measure these stems"); });
+            }
+        }, "measure");
+        t.setPriority(Thread.MIN_PRIORITY);
+        t.start();
+    }
+
     private void showSettings() {
         android.graphics.Rect at = new android.graphics.Rect();
         sessionScreen.offsetDescendantRectToMyCoords(styleRow, at);
@@ -599,11 +933,13 @@ public final class MainActivity extends Activity {
             }
             return true;
         }
+        StemPlayer stems = stemPlayer;
         android.media.MediaPlayer mp = songPlayer;
         float[] levels = songLevels;
-        if (mp == null || levels == null || levels.length == 0) return false;
-        int at = safePosition(mp) / 50;
-        float now = levels[Math.min(levels.length - 1, Math.max(0, at))], before = levels[Math.min(levels.length - 1, Math.max(0, at - 4))];
+        if (stems == null && (mp == null || levels == null || levels.length == 0)) return false;
+        int at = mp == null ? 0 : safePosition(mp) / 50;
+        float now = stems != null ? stems.levelDb() : levels[Math.min(levels.length - 1, Math.max(0, at))];
+        float before = stems != null ? stems.earlierDb() : levels[Math.min(levels.length - 1, Math.max(0, at - 4))];
         float level = Math.max(0, Math.min(1, (now + 26) / 18));
         // A file playing here gives one level, so its rises drive the top two lights.
         three[0] = level;
@@ -614,8 +950,10 @@ public final class MainActivity extends Activity {
 
     /** The source plays here, with the Light Arc following its real level. */
     private void toggleSong() {
-        if (songPlayer != null) { stopSong(); return; }
-        if (songUri == null || measuredNow == null) return;
+        if (songPlayer != null || stemPlayer != null) { stopSong(); return; }
+        if (measuredNow == null) return;
+        if (stemSet != null) { startStems(); return; }
+        if (songUri == null) return;
         player.pause();
         try {
             android.media.MediaPlayer mp = new android.media.MediaPlayer();
@@ -665,6 +1003,9 @@ public final class MainActivity extends Activity {
         if (mp != null) {
             try { mp.release(); } catch (RuntimeException ignored) { }
         }
+        StemPlayer stems = stemPlayer;
+        stemPlayer = null;
+        if (stems != null) { stemFrom = stems.fraction(); stems.stop(); }
         ui(a -> {
             a.songPlay.setText("PLAY SONG");
             a.meter.setLive(null);
@@ -673,8 +1014,9 @@ public final class MainActivity extends Activity {
 
     private void showMeasured(Listen l) {
         meter.setMeasured(l.loudness.integrated);
-        songPlay.setVisibility(songUri != null ? View.VISIBLE : View.GONE);
+        songPlay.setVisibility(hasSource() ? View.VISIBLE : View.GONE);
         if (songPlayer != null) followSong();
+        if (stemPlayer != null) followStems();
         measuredLufs.setText(String.format(Locale.US, "%.1f", l.loudness.integrated));
         measuredPeak.setText(String.format(Locale.US, "%.1f", l.truePeakDb));
         measuredRange.setText(String.format(Locale.US, "%.1f", l.loudness.lra));
@@ -1312,6 +1654,12 @@ public final class MainActivity extends Activity {
             flashOn = !flashOn;
             lightPath(runningStage);
         }
+        StemPlayer stems = stemPlayer;
+        if (stems != null && stemSet != null && !stemSeeking) {
+            double f = stems.fraction();
+            stemSeek.setProgress((int) (f * 1000));
+            stemTime.setText(clock(f * stemSet.seconds()) + " / " + clock(stemSet.seconds()));
+        }
         if (compareScreen.getVisibility() == View.VISIBLE && player.size() > 0) {
             double f = player.fraction(), total = length();
             if (player.isPlaying()) wave.setFraction(f);
@@ -1344,14 +1692,29 @@ public final class MainActivity extends Activity {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("audio/*");
+        if (code == PICK_STEMS) {
+            i.setType("*/*");
+            i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"audio/*", "application/zip", "application/x-zip-compressed"});
+            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        }
         startActivityForResult(i, code);
     }
 
     @Override protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
-        if (result != RESULT_OK || data == null || data.getData() == null) return;
+        if (result != RESULT_OK || data == null) return;
+        if (code == PICK_STEMS) {
+            List<Uri> uris = new ArrayList<>();
+            android.content.ClipData many = data.getClipData();
+            if (many != null) for (int i = 0; i < many.getItemCount(); i++) uris.add(many.getItemAt(i).getUri());
+            else if (data.getData() != null) uris.add(data.getData());
+            importStems(uris);
+            return;
+        }
+        if (data.getData() == null) return;
         Uri uri = data.getData();
         if (code == PICK_SONG) {
+            if (stemSet != null) clearStems();
             songUri = uri; song = nameOf(uri);
             songName.setText(song);
             titleField.setText(song);
@@ -1423,7 +1786,7 @@ public final class MainActivity extends Activity {
             masterButton.setText("MASTER IT");
             Look.surface(masterButton, Look.gold(7));
             masterButton.setTextColor(Look.BG);
-            Look.enable(masterButton, songUri != null);
+            Look.enable(masterButton, hasSource());
         }
         progress.setVisibility(working ? View.VISIBLE : View.GONE);
         boolean takesReady = !order.isEmpty() && !rendering;
@@ -1470,11 +1833,15 @@ public final class MainActivity extends Activity {
         final double asked = level;
         final Target target = currentTarget();
         final Uri uri = songUri;
+        final Stems.Set stems = stemSet;
+        final double[] stemLevels = stemDb.clone();
+        final boolean[] stemsMuted = stemMute.clone();
         final String name = song.replaceAll("[\\\\/:*?\"<>|]", "_");
         final String styleName = style.name();
         final List<String> log = tasteLog();
         final Engineer.Options options = new Engineer.Options();
         options.cleanUp = cleanUpOn;
+        options.fromStems = stems != null;
         final boolean same = song.equals(masteredSong) && sessionDir != null && new File(sessionDir, "source.wav").exists();
         final String settings = settingsLabel();
         final List<Item> lastRound = new ArrayList<>();
@@ -1507,7 +1874,8 @@ public final class MainActivity extends Activity {
                 deleteAll(dir);
                 dir.mkdirs();
                 status("Opening the song");
-                Audio in = same ? Wav.read(new File(sessionDir, "source.wav")) : Decoder.open(app, uri);
+                Audio in = stems != null ? Stems.mix(stems, null, null)
+                        : same ? Wav.read(new File(sessionDir, "source.wav")) : Decoder.open(app, uri);
                 File sourceFile = new File(dir, "source.wav");
                 Wav.write(sourceFile, in, 24);
                 List<Engineer.Recipe> recipes = new ArrayList<>();
@@ -1531,10 +1899,17 @@ public final class MainActivity extends Activity {
                 };
                 final String meta = trackMeta(in);
                 float[] sourceBars = WaveView.measure(in, BARS);
+                // With stems the source stays the song as it came, and the balanced mix is mastered.
+                Listen asItCame = null;
+                if (stems != null) {
+                    asItCame = Listen.to(in);
+                    in = null;
+                    in = Stems.render(stems, stemLevels, stemsMuted, options.cleanUp, dir, options.stemNotes, bar);
+                }
                 Audio[] holder = {in};
                 in = null;
                 Engineer.Session session = Engineer.prepare(holder, target, asked, options, bar);
-                final Listen before = session.before;
+                final Listen before = asItCame != null ? asItCame : session.before;
                 sourceFlatPeaks = session.sourceFlatPeaks;
                 main.post(() -> { setMeta(meta); measuredNow = before; ui(a -> a.showMeasured(before)); });
                 final List<Item> made = new ArrayList<>();
@@ -1757,7 +2132,7 @@ public final class MainActivity extends Activity {
     // Finished masters stay on the phone until new ones replace them -----------
 
     private static String settingsLabel() {
-        return style.label + (commercial ? " Comm " : " ") + String.format(Locale.US, "%.0f", level);
+        return style.label + (commercial ? " Comm " : " ") + String.format(Locale.US, "%.0f", level) + (stemSet != null ? " Stems" : "");
     }
 
     private static File roundFile() { return new File(app.getExternalFilesDir(null), "masters.properties"); }

@@ -391,6 +391,47 @@ public class UiSmokeTest {
         shot("compare_after_reopen");
         tap("Clean");
         assertNotNull(find("SAVE CLEAN"));
+
+        // Stems: Stem Studio's ZIP comes in, the balance moves, and the takes come out.
+        File zip = new File(dir, "Stems.zip");
+        try (java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(new FileOutputStream(zip))) {
+            String[] names = {"Vocals", "Drums", "Bass", "Other"};
+            for (int i = 0; i < 4; i++) {
+                File part = new File(dir, "part.wav");
+                Wav.write(part, song(24, 10 + i, 0.2), 24);
+                z.putNextEntry(new java.util.zip.ZipEntry("Test_Stems_" + names[i] + "_24bit.wav"));
+                java.nio.file.Files.copy(part.toPath(), z);
+                z.closeEntry();
+                part.delete();
+            }
+        }
+        tap("Back");
+        scroll(false);
+        answerPicker(zip);
+        tap("LOAD 4 STEMS");
+        waitFor("stems to load", 120000, () -> hasText("4 stems") && find("+") != null);
+        assertTrue("Song name comes from the stems", hasText("Test_Stems"));
+        shot("stems_loaded");
+        checkTargets();
+        tap("+");
+        tap("+");
+        assertTrue("Level moves in half dB", hasText("+1.0"));
+        tap("PLAY SONG");
+        waitFor("stems playing", 5000, () -> find("STOP STEMS") != null);
+        SystemClock.sleep(1500);
+        tap("S");
+        SystemClock.sleep(800);
+        shot("stems_playing");
+        tap("S");
+        tap("STOP STEMS");
+        assertNotNull(find("PLAY SONG"));
+        tap("MASTER IT");
+        waitFor("masters from stems", 20 * 60 * 1000, () -> find("LEVEL MATCH") != null && hasText("Stems"));
+        shot("compare_from_stems");
+        tap("Session Sheet");
+        ins.waitForIdleSync();
+        assertTrue("The sheet says what happened to the stems", hasText("Vocals stem:") && hasText("Stem levels: Vocals +1.0 dB"));
+        shot("stems_sheet");
         activity.finish();
     }
 

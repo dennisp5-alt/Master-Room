@@ -39,6 +39,37 @@ public final class Loudness {
         return new Biquad(1, -2, 1, 2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0);
     }
 
+    /** Momentary loudness of audio as it plays: the last 400 ms, K-weighted. */
+    public static final class Live {
+        private final Biquad sl, sr, hl, hr;
+        private final double[] segments = new double[4];
+        private final int size;
+        private int slot, filled, inSegment;
+        private double sum;
+        public Live(int rate) {
+            sl = shelf(rate); sr = shelf(rate); hl = highPass(rate); hr = highPass(rate);
+            size = rate / 10;
+        }
+        /** Takes left and right samples, interleaved. */
+        public void add(float[] stereo, int frames) {
+            for (int i = 0; i < frames; i++) {
+                double x = hl.run(sl.run(stereo[2 * i])), y = hr.run(sr.run(stereo[2 * i + 1]));
+                sum += x * x + y * y;
+                if (++inSegment == size) {
+                    segments[slot] = sum / size;
+                    slot = (slot + 1) % segments.length;
+                    filled = Math.min(segments.length, filled + 1);
+                    inSegment = 0;
+                    sum = 0;
+                }
+            }
+        }
+        public double lufs() {
+            if (filled < segments.length) return Double.NaN;
+            return Loudness.lufs((segments[0] + segments[1] + segments[2] + segments[3]) / 4);
+        }
+    }
+
     public static Result measure(Audio a) {
         int seg = a.rate / 10, count = a.frames() / seg;
         double[] power = new double[Math.max(1, count)];

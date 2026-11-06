@@ -23,7 +23,10 @@ final class CleanUp {
     private CleanUp() {}
 
     /** Works in place, so a long song needs no second copy of itself. */
-    static Audio apply(Audio in, Outcome out) {
+    static Audio apply(Audio in, Outcome out) { return apply(in, out, true); }
+
+    /** A voice on its own is all narrow peaks by nature, so its stem skips the resonance half. */
+    static Audio apply(Audio in, Outcome out, boolean resonances) {
         int n = in.frames(), rate = in.rate;
         float[] mid = in.l, side = in.r;
         for (int i = 0; i < n; i++) {
@@ -46,7 +49,7 @@ final class CleanUp {
             to[b] = Math.max(from[b], (int) Math.round(centre[b] * Math.pow(2, 1 / (2 * BANDS_PER_OCTAVE)) / hz));
         }
 
-        float[][] cut = resonance(mid, side, window, fft, frames, hop, rate, from, to, centre, out);
+        float[][] cut = resonances ? resonance(mid, side, window, fft, frames, hop, rate, from, to, centre, out) : null;
         double[] gainDb = new double[size / 2 + 1];
         float[] outMid = new float[size], outSide = new float[size];
 
@@ -71,7 +74,7 @@ final class CleanUp {
             if (now < 0) continue;
             int at = now % SPAN;
             Arrays.fill(gainDb, 0);
-            shapeResonance(cut[now], centre, hz, gainDb);
+            if (cut != null) shapeResonance(cut[now], centre, hz, gainDb);
 
             for (int i = 0; i < SPAN; i++) line[i] = top[i];
             Arrays.sort(line);
