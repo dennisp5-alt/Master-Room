@@ -847,7 +847,7 @@ public final class MainActivity extends Activity {
                     java.util.Arrays.fill(stemDb, 0);
                     java.util.Arrays.fill(stemMute, false);
                     java.util.Arrays.fill(stemSolo, false);
-                    statusNow = "Stems loaded. Set the balance, then press Master It.";
+                    statusNow = "Stems loaded. Press Master It when ready.";
                     keepStems();
                     ui(a -> {
                         a.statusLine.setText(statusNow);

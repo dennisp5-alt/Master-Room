@@ -419,9 +419,11 @@ public class UiSmokeTest {
         assertNotNull("All six stems have rows", find("Piano"));
         shot("stems_loaded");
         checkTargets();
+        String level = "Vocals level in dB. Tap to reset";
+        double was = Double.parseDouble(((TextView) find(level)).getText().toString());
         tap("+");
         tap("+");
-        assertTrue("Level moves in half dB", hasText("+1.0"));
+        assertEquals("Level moves in half dB", was + 1, Double.parseDouble(((TextView) find(level)).getText().toString()), 0.01);
         tap("PLAY SONG");
         waitFor("stems playing", 5000, () -> find("STOP STEMS") != null);
         SystemClock.sleep(1500);

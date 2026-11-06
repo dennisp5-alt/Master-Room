@@ -266,6 +266,11 @@ public final class Stems {
                 db[g] = clamp(db[g] + 0.5 * move, MOST_DB[g]);
             }
         }
+        // Every part moving the same way is only a level change, which the chain sets anyway.
+        double least = Double.MAX_VALUE, most = -Double.MAX_VALUE;
+        for (double move : db) { least = Math.min(least, move); most = Math.max(most, move); }
+        double shared = least > 0 ? least : most < 0 ? most : 0;
+        for (int g = 0; g < CORE; g++) db[g] -= shared;
         for (int part = 0; part < COUNT; part++) {
             if (reading.power[part] != null) out.levelDb[part] = Math.round(db[Math.min(part, OTHER)] * 2) / 2.0;
             db[Math.min(part, OTHER)] = out.levelDb[Math.min(part, OTHER)];
