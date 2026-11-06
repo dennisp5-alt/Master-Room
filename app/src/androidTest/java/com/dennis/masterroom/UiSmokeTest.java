@@ -397,10 +397,10 @@ public class UiSmokeTest {
         // Stems: Stem Studio's ZIP comes in, the balance moves, and the takes come out.
         File zip = new File(dir, "Stems.zip");
         try (java.util.zip.ZipOutputStream z = new java.util.zip.ZipOutputStream(new FileOutputStream(zip))) {
-            String[] names = {"Vocals", "Drums", "Bass", "Other"};
-            for (int i = 0; i < 4; i++) {
+            String[] names = {"Vocals", "Drums", "Bass", "Other", "Guitar", "Piano"};
+            for (int i = 0; i < 6; i++) {
                 File part = new File(dir, "part.wav");
-                Wav.write(part, song(24, 10 + i, 0.2), 24);
+                Wav.write(part, song(24, 10 + i, 0.12), 24);
                 z.putNextEntry(new java.util.zip.ZipEntry("Test_Stems_" + names[i] + "_24bit.wav"));
                 java.nio.file.Files.copy(part.toPath(), z);
                 z.closeEntry();
@@ -410,9 +410,13 @@ public class UiSmokeTest {
         tap("Back");
         scroll(false);
         answerPicker(zip);
-        tap("LOAD 4 STEMS");
-        waitFor("stems to load", 120000, () -> hasText("4 stems") && find("+") != null);
+        tap("LOAD STEMS");
+        waitFor("stems to load and balance", 120000, () -> hasText("6 stems") && hasText("Auto balance:"));
         assertTrue("Song name comes from the stems", hasText("Test_Stems"));
+        assertNull("The balance is the app's job until asked", find("M"));
+        shot("stems_auto");
+        tap("ADJUST MYSELF");
+        assertNotNull("All six stems have rows", find("Piano"));
         shot("stems_loaded");
         checkTargets();
         tap("+");
@@ -430,6 +434,8 @@ public class UiSmokeTest {
         assertNotNull(find("PLAY SONG"));
         tap("PLAY SONG");
         waitFor("stems to run out and rewind", 60000, () -> find("PLAY SONG") != null && hasText("0:00 / 0:24"));
+        tap("BACK TO AUTO");
+        assertTrue("Auto takes the balance back", hasText("Auto balance:"));
         tap("MASTER IT");
         waitFor("masters from stems", 20 * 60 * 1000, () -> find("LEVEL MATCH") != null);
         shot("compare_from_stems");
@@ -437,7 +443,7 @@ public class UiSmokeTest {
         if (!hasText("As it came in")) tap("Session Sheet");
         ins.waitForIdleSync();
         scroll(true);
-        assertTrue("The sheet says what happened to the stems", hasText("Vocals stem:") && hasText("Stem levels: Vocals +1.0 dB"));
+        assertTrue("The sheet says what happened to the stems", hasText("Vocals stem:") && hasText("Guitar stem:") && hasText("Auto balance:"));
         shot("stems_sheet");
         activity.finish();
     }

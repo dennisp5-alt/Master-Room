@@ -17,13 +17,13 @@ final class StemPlayer {
     private final Stems.Set set;
     private final Runnable ended;
     private final int start;
-    private volatile float[] wanted;
+    private volatile float[] wanted, ride;
     private volatile boolean running = true;
     private volatile int jump = -1, at;
     private volatile float levelDb = -60, earlierDb = -60, lufs = Float.NaN;
 
-    StemPlayer(Stems.Set set, float[] gains, double from, Runnable ended) {
-        this.set = set; this.wanted = gains; this.ended = ended;
+    StemPlayer(Stems.Set set, float[] gains, float[] ride, double from, Runnable ended) {
+        this.set = set; this.wanted = gains; this.ride = ride; this.ended = ended;
         start = (int) (Math.max(0, Math.min(0.999, from)) * set.frames);
         at = start;
     }
@@ -35,7 +35,7 @@ final class StemPlayer {
     }
 
     void stop() { running = false; }
-    void setGains(float[] gains) { wanted = gains; }
+    void setGains(float[] gains, float[] ride) { wanted = gains; this.ride = ride; }
     void seekTo(double fraction) { jump = (int) (Math.max(0, Math.min(0.999, fraction)) * set.frames); }
     double fraction() { return at / (double) set.frames; }
     float levelDb() { return levelDb; }
@@ -58,6 +58,7 @@ final class StemPlayer {
                     .setTransferMode(AudioTrack.MODE_STREAM).build();
             byte[][] raw = new byte[Stems.COUNT][];
             for (int s = 0; s < Stems.COUNT; s++) {
+                if (!set.has(s)) continue;
                 in[s] = new RandomAccessFile(set.files[s], "r");
                 raw[s] = new byte[BLOCK * set.headers[s].frameBytes()];
             }
@@ -78,22 +79,27 @@ final class StemPlayer {
                     track.play();
                 }
                 if (place) {
-                    for (int s = 0; s < Stems.COUNT; s++) in[s].seek(set.headers[s].dataStart + pos * (long) set.headers[s].frameBytes());
+                    for (int s = 0; s < Stems.COUNT; s++) {
+                        if (in[s] != null) in[s].seek(set.headers[s].dataStart + pos * (long) set.headers[s].frameBytes());
+                    }
                     place = false;
                 }
                 int n = Math.min(BLOCK, set.frames - pos);
                 java.util.Arrays.fill(out, 0, n * 2, 0);
                 float[] aim = wanted;
+                float lift = Stems.rideGain(ride, pos, set.rate);
                 for (int s = 0; s < Stems.COUNT; s++) {
+                    if (in[s] == null) continue;
                     Wav.Header h = set.headers[s];
                     in[s].readFully(raw[s], 0, n * h.frameBytes());
                     Wav.decode(h, raw[s], n, l, r);
-                    float gain = now[s], step = (aim[s] - gain) / n;
+                    float end = aim[s] * (s == Stems.VOCALS ? lift : 1);
+                    float gain = now[s], step = (end - gain) / n;
                     for (int i = 0; i < n; i++, gain += step) {
                         out[2 * i] += l[i] * gain;
                         out[2 * i + 1] += r[i] * gain;
                     }
-                    now[s] = aim[s];
+                    now[s] = end;
                 }
                 meter.add(out, n);
                 lufs = (float) meter.lufs();

@@ -70,6 +70,44 @@ public final class Loudness {
         }
     }
 
+    /** K-weighted power in steps of a tenth of a second, for working through a long file. */
+    static final class Steps {
+        final float[] power;
+        private final Biquad sl, sr, hl, hr;
+        private final int size;
+        private int at, inStep;
+        private double sum;
+        Steps(int rate, int frames) {
+            sl = shelf(rate); sr = shelf(rate); hl = highPass(rate); hr = highPass(rate);
+            size = rate / 10;
+            power = new float[frames / size];
+        }
+        void add(float[] left, float[] right, int n) {
+            for (int i = 0; i < n; i++) {
+                double x = hl.run(sl.run(left[i])), y = hr.run(sr.run(right[i]));
+                sum += x * x + y * y;
+                if (++inStep == size) {
+                    if (at < power.length) power[at++] = (float) (sum / size);
+                    inStep = 0;
+                    sum = 0;
+                }
+            }
+        }
+    }
+
+    /** Programme loudness of a run of steps, gated the way a full reading is. */
+    static double gatedLufs(float[] steps) {
+        if (steps.length < 4) return -70;
+        double[] block = new double[steps.length - 3];
+        double run = 0;
+        for (int i = 0; i < steps.length; i++) {
+            run += steps[i];
+            if (i >= 4) run -= steps[i - 4];
+            if (i >= 3) block[i - 3] = run / 4;
+        }
+        return gated(block);
+    }
+
     public static Result measure(Audio a) {
         int seg = a.rate / 10, count = a.frames() / seg;
         double[] power = new double[Math.max(1, count)];

@@ -269,7 +269,7 @@ public final class EngineChecks {
         Engineer.Recipe mine = Taste.yours(log, "COUNTRY");
         check("Yours take leans to what you pick", mine != null && Math.abs(mine.valve - 0.49) < 0.02, mine == null ? "none" : String.format(Locale.US, "valve %.2f", mine.valve));
 
-        try { stems(); } catch (Exception problem) { check("Stems", false, String.valueOf(problem)); }
+        try { stems(); autoBalance(); } catch (Exception problem) { check("Stems", false, String.valueOf(problem)); }
         System.out.println(failed == 0 ? "ALL_ENGINE_CHECKS_PASS" : failed + " CHECK(S) FAILED");
         if (failed != 0) System.exit(1);
     }
@@ -337,9 +337,9 @@ public final class EngineChecks {
         java.io.File dir = java.nio.file.Files.createTempDirectory("stems").toFile();
         int rate = 48000, n = 8 * rate;
         Random q = new Random(9);
-        Audio[] parts = new Audio[Stems.COUNT];
-        java.io.File[] files = new java.io.File[Stems.COUNT];
-        for (int p = 0; p < Stems.COUNT; p++) {
+        Audio[] parts = new Audio[Stems.CORE];
+        java.io.File[] files = new java.io.File[Stems.CORE];
+        for (int p = 0; p < Stems.CORE; p++) {
             parts[p] = new Audio(n, rate);
             double hz = 110 * (p + 1), amount = 0.1 + 0.03 * p;
             for (int i = 0; i < n; i++) {
@@ -356,8 +356,8 @@ public final class EngineChecks {
         double worst = 0;
         for (int i = 0; i < n; i++) worst = Math.max(worst, Math.abs(flat.l[i] - parts[0].l[i] - parts[1].l[i] - parts[2].l[i] - parts[3].l[i]));
         check("Flat stems sum exactly", worst < 3e-6, String.format(Locale.US, "off by %.1e", worst));
-        double[] up = {6, 0, 0, 0};
-        boolean[] none = new boolean[Stems.COUNT], mute = {false, true, false, false};
+        double[] up = {6, 0, 0, 0, 0, 0};
+        boolean[] none = new boolean[Stems.COUNT], mute = {false, true, false, false, false, false};
         Audio moved = Stems.mix(set, up, mute);
         worst = 0;
         double g = Math.pow(10, 6.0 / 20);
@@ -366,13 +366,13 @@ public final class EngineChecks {
 
         // The drums and bass must come through treatment untouched.
         java.util.List<String> notes = new java.util.ArrayList<>();
-        boolean[] onlyDrumsBass = {true, false, false, true};
-        Audio kept = Stems.render(set, new double[Stems.COUNT], onlyDrumsBass, true, dir, notes, (s, p) -> { });
+        boolean[] onlyDrumsBass = {true, false, false, true, false, false};
+        Audio kept = Stems.render(set, new double[Stems.COUNT], null, onlyDrumsBass, true, dir, notes, (s, p) -> { });
         worst = 0;
         for (int i = 0; i < n; i++) worst = Math.max(worst, Math.abs(kept.l[i] - parts[1].l[i] - parts[2].l[i]));
         check("Drums and bass stay untreated", worst < 3e-6, String.format(Locale.US, "off by %.1e", worst));
         boolean refused = false;
-        try { Stems.render(set, new double[Stems.COUNT], new boolean[]{true, true, true, true}, true, dir, notes, (s, p) -> { }); }
+        try { Stems.render(set, new double[Stems.COUNT], null, new boolean[]{true, true, true, true, false, false}, true, dir, notes, (s, p) -> { }); }
         catch (java.io.IOException e) { refused = true; }
         check("All muted is refused", refused, "");
         check("No temporary stems left", new java.io.File(dir, "stem0.raw").exists() == false && new java.io.File(dir, "stem3.raw").exists() == false, "");
@@ -391,7 +391,7 @@ public final class EngineChecks {
         o.fromStems = true;
         notes.clear();
         Audio mixed = Stems.render(Stems.open(new java.io.File[]{new java.io.File(dir, "Vocals.wav"), new java.io.File(dir, "Drums.wav"), new java.io.File(dir, "Bass.wav"), new java.io.File(dir, "Other.wav")}),
-                new double[Stems.COUNT], none, true, dir, o.stemNotes, (s, p) -> { });
+                new double[Stems.COUNT], null, none, true, dir, o.stemNotes, (s, p) -> { });
         Audio[] hand = {mixed};
         Engineer.Session s = Engineer.prepare(hand, Target.builtIn(Target.Style.ROCK), -14, o, (x, y) -> { });
         boolean said = false, doubled = false;
@@ -409,6 +409,38 @@ public final class EngineChecks {
         live.add(both, tone.frames());
         double wanted = Loudness.measure(tone).integrated;
         check("Live loudness matches the measure", Math.abs(live.lufs() - wanted) < 0.1, String.format(Locale.US, "%.2f vs %.2f", live.lufs(), wanted));
+    }
+
+    /** Four noise stems at chosen levels against one another, as files. */
+    static Stems.Reading stemsAt(java.io.File dir, double[] levels) throws Exception {
+        java.io.File[] files = new java.io.File[Stems.CORE];
+        Random q = new Random(4);
+        for (int p = 0; p < Stems.CORE; p++) {
+            Audio a = new Audio(20 * 48000, 48000);
+            float amount = (float) (0.1 * Math.pow(10, levels[p] / 20));
+            for (int i = 0; i < a.frames(); i++) { a.l[i] = (float) q.nextGaussian() * amount; a.r[i] = (float) q.nextGaussian() * amount; }
+            files[p] = new java.io.File(dir, Stems.NAMES[p] + ".wav");
+            Wav.write(files[p], a, 24);
+        }
+        return Stems.read(Stems.open(files));
+    }
+
+    /** The app's own balance: leaves a good mix alone, fixes a poor one, and stays within reach. */
+    static void autoBalance() throws Exception {
+        java.io.File dir = java.nio.file.Files.createTempDirectory("balance").toFile();
+        Stems.Balance fine = Stems.decide(stemsAt(dir, new double[]{-3.6, -6.5, -8.1, -5.0}), Target.Style.ROCK);
+        check("A good balance is left alone", Math.abs(fine.levelDb[0]) + Math.abs(fine.levelDb[1]) + Math.abs(fine.levelDb[2]) + Math.abs(fine.levelDb[3]) < 0.01 && fine.mostRideDb < 0.25, fine.words());
+        Stems.Balance buried = Stems.decide(stemsAt(dir, new double[]{-14, -6.5, -8.1, -5.0}), Target.Style.ROCK);
+        check("A buried vocal comes up, within reach", buried.levelDb[Stems.VOCALS] >= 2 && buried.levelDb[Stems.VOCALS] <= 2.5, buried.words());
+        check("Rides stay small", buried.mostRideDb <= 2.01, String.format(Locale.US, "%.1f dB", buried.mostRideDb));
+        Stems.Balance none = Stems.decide(stemsAt(dir, new double[]{-40, -6.5, -8.1, -5.0}), Target.Style.ROCK);
+        check("No vocal means nothing moves", none.noVocal && none.levelDb[Stems.DRUMS] == 0, none.words());
+        Stems.Balance loud = Stems.decide(stemsAt(dir, new double[]{-1.5, -6.5, -8.1, -5.0}), Target.Style.METAL);
+        Stems.Balance same = Stems.decide(stemsAt(dir, new double[]{-1.5, -6.5, -8.1, -5.0}), Target.Style.ROCK);
+        check("Metal vocals sit lower", loud.levelDb[Stems.VOCALS] < same.levelDb[Stems.VOCALS], loud.words());
+        check("Rides follow the time", Math.abs(Stems.rideGain(new float[]{0, 6, 6}, 2400, 48000) - Math.pow(10, 3 / 20.0)) < 0.01, "");
+        for (java.io.File f : dir.listFiles()) f.delete();
+        dir.delete();
     }
 
     static boolean refused(Audio a) {

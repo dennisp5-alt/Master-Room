@@ -159,10 +159,14 @@ public final class MainActivity extends Activity {
     private static final boolean[] stemMute = new boolean[Stems.COUNT], stemSolo = new boolean[Stems.COUNT];
     private static StemPlayer stemPlayer;
     private static double stemFrom;
-    private static boolean stemBusy, stemSeeking;
+    private static boolean stemBusy, stemSeeking, stemManual;
+    /** The app sets the balance itself unless asked not to. */
+    private static Stems.Reading stemReading;
+    private static Stems.Balance stemAuto;
+    private static float[] stemRide;
     private LinearLayout stemRows, stemTransport;
     private TextView stemHint, stemTime;
-    private Button stemLoad;
+    private Button stemLoad, stemAdjust;
     private SeekBar stemSeek;
 
     /** Runs on the screen that is showing now, if there is one. */
@@ -510,6 +514,8 @@ public final class MainActivity extends Activity {
             }
             Button b = parts.segment(pick.label, pick == style, Look.strong, v -> {
                 style = pick;
+                applyAuto();
+                drawStems();
                 getSharedPreferences("choices", MODE_PRIVATE).edit().putString("style", pick.name()).apply();
                 genreList.setVisibility(View.GONE);
                 drawStyles();
@@ -584,12 +590,20 @@ public final class MainActivity extends Activity {
         LinearLayout head = parts.row();
         head.addView(parts.label("STEMS"));
         head.addView(parts.grow());
-        stemLoad = parts.link("LOAD 4 STEMS", v -> stemAction());
+        stemLoad = parts.link("LOAD STEMS", v -> stemAction());
         Look.type(stemLoad, Look.label, 13, Look.AMBER);
         head.addView(stemLoad, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
         box.addView(head);
         stemHint = parts.text("", Look.body, 11, Look.DIM);
         box.addView(stemHint);
+        stemAdjust = parts.link("ADJUST MYSELF", v -> {
+            stemManual = !stemManual;
+            applyAuto();
+            keepStems();
+            drawStems();
+        });
+        Look.type(stemAdjust, Look.label, 13, Look.AMBER);
+        box.addView(stemAdjust, Parts.line(Look.dp(48), 0));
         stemRows = new LinearLayout(this);
         stemRows.setOrientation(LinearLayout.VERTICAL);
         box.addView(stemRows, Parts.line(Parts.WRAP, 5));
@@ -634,23 +648,50 @@ public final class MainActivity extends Activity {
         stopSong();
         stemSet = null;
         stemFrom = 0;
-        getSharedPreferences("choices", MODE_PRIVATE).edit().remove("stems").remove("stemDb").remove("stemMute").apply();
+        forgetBalance();
+        getSharedPreferences("choices", MODE_PRIVATE).edit().remove("stems").remove("stemDb").remove("stemMute").remove("stemManual").apply();
         worker.execute(() -> deleteAll(new File(app.getExternalFilesDir(null), "stems")));
         drawStems();
     }
 
+    private static void forgetBalance() {
+        stemManual = false;
+        stemReading = null;
+        stemAuto = null;
+        stemRide = null;
+    }
+
+    /** Takes up the app's own balance, unless Dennis has taken over. */
+    private static void applyAuto() {
+        if (stemManual || stemReading == null) return;
+        stemAuto = Stems.decide(stemReading, style);
+        System.arraycopy(stemAuto.levelDb, 0, stemDb, 0, Stems.COUNT);
+        java.util.Arrays.fill(stemMute, false);
+        java.util.Arrays.fill(stemSolo, false);
+        stemRide = stemAuto.rideDb;
+        if (stemPlayer != null) stemPlayer.setGains(stemGains(), stemRide);
+    }
+
     private void drawStems() {
         boolean on = stemSet != null;
-        stemLoad.setText(on ? "CLEAR" : "LOAD 4 STEMS");
-        stemHint.setText(on ? "Vocals and other instruments are cleaned on their own. Drums and bass are left alone. Small moves work best, as each stem holds traces of the others."
-                : "Use the files from Stem Studio: its ZIP, or all four WAVs.");
+        stemLoad.setText(on ? "CLEAR" : "LOAD STEMS");
+        String treated = "Vocals and other instruments are cleaned on their own. Drums and bass are left alone.";
+        stemHint.setText(!on ? "Use the files from Stem Studio: its ZIP, or all the WAVs."
+                : stemManual ? treated + " Small moves work best, as each stem holds traces of the others."
+                : stemAuto == null ? "Working out the balance"
+                : "Auto balance: " + stemAuto.words() + ". " + treated);
+        stemAdjust.setText(stemManual ? "BACK TO AUTO" : "ADJUST MYSELF");
+        stemAdjust.setVisibility(on ? View.VISIBLE : View.GONE);
         stemRows.removeAllViews();
-        stemRows.setVisibility(on ? View.VISIBLE : View.GONE);
+        stemRows.setVisibility(on && stemManual ? View.VISIBLE : View.GONE);
         stemTransport.setVisibility(on ? View.VISIBLE : View.GONE);
         if (!on) return;
         stemTime.setText(clock(stemFrom * stemSet.seconds()) + " / " + clock(stemSet.seconds()));
         stemSeek.setProgress((int) (stemFrom * 1000));
-        for (int i = 0; i < Stems.COUNT; i++) stemRows.addView(stemRow(i), Parts.line(Look.dp(50), 0));
+        if (!stemManual) return;
+        for (int i = 0; i < Stems.COUNT; i++) {
+            if (stemSet.has(i)) stemRows.addView(stemRow(i), Parts.line(Look.dp(50), 0));
+        }
     }
 
     private LinearLayout stemRow(int part) {
@@ -698,7 +739,7 @@ public final class MainActivity extends Activity {
 
     private void stemsChanged() {
         keepStems();
-        if (stemPlayer != null) stemPlayer.setGains(stemGains());
+        if (stemPlayer != null) stemPlayer.setGains(stemGains(), stemRide);
         drawStems();
     }
 
@@ -709,7 +750,7 @@ public final class MainActivity extends Activity {
             mute.append(stemMute[i] ? '1' : '0');
         }
         app.getSharedPreferences("choices", MODE_PRIVATE).edit().putString("stems", song)
-                .putString("stemDb", db.toString()).putString("stemMute", mute.toString()).apply();
+                .putString("stemDb", db.toString()).putString("stemMute", mute.toString()).putBoolean("stemManual", stemManual).apply();
     }
 
     /** Stems survive the app closing, with their balance. */
@@ -721,7 +762,8 @@ public final class MainActivity extends Activity {
             stemSet = Stems.open(stemFiles(new File(app.getExternalFilesDir(null), "stems")));
             String[] db = p.getString("stemDb", "0,0,0,0").split(",");
             String mute = p.getString("stemMute", "0000");
-            for (int i = 0; i < Stems.COUNT; i++) { stemDb[i] = Double.parseDouble(db[i]); stemMute[i] = mute.charAt(i) == '1'; }
+            for (int i = 0; i < Math.min(db.length, mute.length()); i++) { stemDb[i] = Double.parseDouble(db[i]); stemMute[i] = mute.charAt(i) == '1'; }
+            stemManual = p.getBoolean("stemManual", false);
             song = title;
             songUri = null;
             songAction.setText("Change");
@@ -733,7 +775,10 @@ public final class MainActivity extends Activity {
 
     private static File[] stemFiles(File dir) {
         File[] files = new File[Stems.COUNT];
-        for (int i = 0; i < Stems.COUNT; i++) files[i] = new File(dir, Stems.NAMES[i] + ".wav");
+        for (int i = 0; i < Stems.COUNT; i++) {
+            File f = new File(dir, Stems.NAMES[i] + ".wav");
+            files[i] = i < Stems.CORE || f.exists() ? f : null;
+        }
         return files;
     }
 
@@ -751,7 +796,7 @@ public final class MainActivity extends Activity {
 
     private void startStems() {
         player.pause();
-        StemPlayer sp = new StemPlayer(stemSet, stemGains(), stemFrom, () -> main.post(() -> {
+        StemPlayer sp = new StemPlayer(stemSet, stemGains(), stemRide, stemFrom, () -> main.post(() -> {
             stopSong();
             stemFrom = 0;
             ui(MainActivity::drawStems);
@@ -780,13 +825,14 @@ public final class MainActivity extends Activity {
             try {
                 deleteAll(fresh);
                 fresh.mkdirs();
-                File[] files = stemFiles(fresh);
+                File[] places = new File[Stems.COUNT];
+                for (int i = 0; i < Stems.COUNT; i++) places[i] = new File(fresh, Stems.NAMES[i] + ".wav");
                 String[] title = {null};
-                for (Uri uri : uris) copyStems(uri, files, title);
-                for (int i = 0; i < Stems.COUNT; i++) {
-                    if (!files[i].exists()) throw new IOException("The " + Stems.NAMES[i] + " stem is missing. Pick all four, or the ZIP");
+                for (Uri uri : uris) copyStems(uri, places, title);
+                for (int i = 0; i < Stems.CORE; i++) {
+                    if (!places[i].exists()) throw new IOException("The " + Stems.NAMES[i] + " stem is missing. Pick them all, or the ZIP");
                 }
-                Stems.open(files);
+                Stems.open(stemFiles(fresh));
                 deleteAll(home);
                 if (!fresh.renameTo(home)) throw new IOException("Could not keep the stems");
                 final Stems.Set set = Stems.open(stemFiles(home));
@@ -797,6 +843,7 @@ public final class MainActivity extends Activity {
                     songUri = null;
                     song = name;
                     stemFrom = 0;
+                    forgetBalance();
                     java.util.Arrays.fill(stemDb, 0);
                     java.util.Arrays.fill(stemMute, false);
                     java.util.Arrays.fill(stemSolo, false);
@@ -880,13 +927,19 @@ public final class MainActivity extends Activity {
         Thread t = new Thread(() -> {
             try {
                 Audio a = Stems.mix(set, null, null);
-                final String meta = trackMeta(a) + "  4 stems";
-                Listen l = Listen.to(a);
+                int count = 0;
+                for (int i = 0; i < Stems.COUNT; i++) if (set.has(i)) count++;
+                final String meta = trackMeta(a) + "  " + count + " stems";
+                final Listen l = Listen.to(a);
+                a = null;
+                final Stems.Reading reading = Stems.read(set);
                 main.post(() -> {
                     if (token != measureToken) return;
                     setMeta(meta);
                     measuredNow = l;
-                    ui(x -> x.showMeasured(l));
+                    stemReading = reading;
+                    applyAuto();
+                    ui(x -> { x.showMeasured(l); x.drawStems(); });
                 });
             } catch (Throwable e) {
                 main.post(() -> { if (token == measureToken) setMeta("Could not measure these stems"); });
@@ -1840,6 +1893,10 @@ public final class MainActivity extends Activity {
         final Stems.Set stems = stemSet;
         final double[] stemLevels = stemDb.clone();
         final boolean[] stemsMuted = stemMute.clone();
+        final boolean stemsAuto = !stemManual;
+        final float[] stemRides = stemRide;
+        final Stems.Reading stemsRead = stemReading;
+        final Target.Style stemStyle = style;
         final String name = song.replaceAll("[\\\\/:*?\"<>|]", "_");
         final String styleName = style.name();
         final List<String> log = tasteLog();
@@ -1908,7 +1965,15 @@ public final class MainActivity extends Activity {
                 if (stems != null) {
                     asItCame = Listen.to(in);
                     in = null;
-                    in = Stems.render(stems, stemLevels, stemsMuted, options.cleanUp, dir, options.stemNotes, bar);
+                    double[] levels = stemLevels;
+                    float[] rides = stemRides;
+                    if (stemsAuto) {
+                        Stems.Balance balance = Stems.decide(stemsRead != null ? stemsRead : Stems.read(stems), stemStyle);
+                        levels = balance.levelDb;
+                        rides = balance.rideDb;
+                        options.stemNotes.add("Auto balance: " + balance.words());
+                    }
+                    in = Stems.render(stems, levels, rides, stemsMuted, options.cleanUp, dir, options.stemNotes, bar);
                 }
                 Audio[] holder = {in};
                 in = null;

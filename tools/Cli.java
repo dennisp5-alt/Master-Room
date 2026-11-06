@@ -25,7 +25,14 @@ public final class Cli {
                 Wav.write(new File(dir, "flat.wav"), Stems.mix(set, null, null), 24);
             }
             o.fromStems = true;
-            hand[0] = Stems.render(set, levels, muted, o.cleanUp, dir, o.stemNotes, (s, n) -> {});
+            float[] ride = null;
+            if (System.getProperty("auto") != null) {
+                Stems.Balance b = Stems.decide(Stems.read(set), Target.Style.valueOf(System.getProperty("auto")));
+                levels = b.levelDb;
+                ride = b.rideDb;
+                System.out.println("AUTO " + b.words());
+            }
+            hand[0] = Stems.render(set, levels, ride, muted, o.cleanUp, dir, o.stemNotes, (s, n) -> {});
         }
         double lufs = Double.parseDouble(a[2]);
         Target.Style style = a.length > 3 ? Target.Style.valueOf(a[3]) : Target.Style.COUNTRY;

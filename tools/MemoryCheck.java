@@ -34,8 +34,9 @@ public final class MemoryCheck {
             Listen.to(flat);
             flat = null;
             options.fromStems = true;
-            holder[0] = Stems.render(set, new double[]{1, 0, 0, -1}, new boolean[Stems.COUNT], true, dir, options.stemNotes, quiet);
-            for (java.io.File f : files) f.delete();
+            Stems.Balance b = Stems.decide(Stems.read(set), Target.Style.ROCK);
+            holder[0] = Stems.render(set, b.levelDb, b.rideDb, new boolean[Stems.COUNT], true, dir, options.stemNotes, quiet);
+            for (java.io.File f : files) if (f != null) f.delete();
             dir.delete();
         }
         song = null;
