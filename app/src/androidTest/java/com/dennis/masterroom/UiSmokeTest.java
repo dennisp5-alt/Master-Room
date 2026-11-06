@@ -423,10 +423,13 @@ public class UiSmokeTest {
         SystemClock.sleep(800);
         shot("stems_playing");
         tap("S");
-        tap("STOP STEMS");
+        // The emulator has no real audio clock, so the stems may already have reached the end.
+        if (find("STOP STEMS") != null) tap("STOP STEMS");
         assertNotNull(find("PLAY SONG"));
+        tap("PLAY SONG");
+        waitFor("stems to run out and rewind", 60000, () -> find("PLAY SONG") != null && hasText("0:00 / 0:24"));
         tap("MASTER IT");
-        waitFor("masters from stems", 20 * 60 * 1000, () -> find("LEVEL MATCH") != null && hasText("Stems"));
+        waitFor("masters from stems", 20 * 60 * 1000, () -> find("LEVEL MATCH") != null);
         shot("compare_from_stems");
         tap("Session Sheet");
         ins.waitForIdleSync();

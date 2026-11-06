@@ -751,7 +751,11 @@ public final class MainActivity extends Activity {
 
     private void startStems() {
         player.pause();
-        StemPlayer sp = new StemPlayer(stemSet, stemGains(), stemFrom, () -> main.post(() -> { stemFrom = 0; stopSong(); }));
+        StemPlayer sp = new StemPlayer(stemSet, stemGains(), stemFrom, () -> main.post(() -> {
+            stopSong();
+            stemFrom = 0;
+            ui(MainActivity::drawStems);
+        }));
         stemPlayer = sp;
         sp.start();
         followStems();
