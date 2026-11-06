@@ -431,8 +431,10 @@ public class UiSmokeTest {
         tap("MASTER IT");
         waitFor("masters from stems", 20 * 60 * 1000, () -> find("LEVEL MATCH") != null);
         shot("compare_from_stems");
-        tap("Session Sheet");
+        // Left open from earlier in this run, so only open it if it is shut.
+        if (!hasText("As it came in")) tap("Session Sheet");
         ins.waitForIdleSync();
+        scroll(true);
         assertTrue("The sheet says what happened to the stems", hasText("Vocals stem:") && hasText("Stem levels: Vocals +1.0 dB"));
         shot("stems_sheet");
         activity.finish();
