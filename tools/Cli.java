@@ -19,7 +19,7 @@ public final class Cli {
             double[] levels = new double[Stems.COUNT];
             boolean[] muted = new boolean[Stems.COUNT];
             String[] v = System.getProperty("levels", "0,0,0,0").split(","), m = System.getProperty("mute", "0,0,0,0").split(",");
-            for (int i = 0; i < Stems.COUNT; i++) { levels[i] = Double.parseDouble(v[i]); muted[i] = m[i].equals("1"); }
+            for (int i = 0; i < Stems.CORE; i++) { levels[i] = Double.parseDouble(v[i]); muted[i] = m[i].equals("1"); }
             Stems.Set set = Stems.open(files);
             if (System.getProperty("flat") != null) {
                 Wav.write(new File(dir, "flat.wav"), Stems.mix(set, null, null), 24);
