@@ -1,0 +1,13 @@
+Master Room for Windows - third-party components shipped with the app
+
+Java runtime: Eclipse Temurin (OpenJDK 21), GPL v2 with the Classpath Exception.
+  https://adoptium.net  -  https://openjdk.org/legal/gplv2+ce.html
+
+FFmpeg (ffmpeg.exe, unmodified LGPL build by BtbN/FFmpeg-Builds), LGPL v2.1 or later.
+  Used as a separate program to read FLAC, M4A, AAC, OGG, Opus, AIFF and WMA, and for the AAC streaming check.
+  Licence: app\ffmpeg\LICENSE-FFmpeg-LGPL.txt. Source: https://ffmpeg.org and https://github.com/BtbN/FFmpeg-Builds
+
+Fonts: Barlow and Barlow Condensed (Jeremy Tribby), JetBrains Mono (JetBrains), SIL Open Font License 1.1.
+  Licences ship inside masterroom.jar (fonts/OFL-*.txt).
+
+MP3 encoding and decoding: jump3r (Java port of LAME), LGPL - see THIRD_PARTY_NOTICES.md.

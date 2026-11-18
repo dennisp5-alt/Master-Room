@@ -40,3 +40,20 @@ judging sound.
 Tuning still to be done by ear: the built-in tone curve, colour amounts, take settings, and how
 much of the peak work the clipper should take (set on Brand New Boots: up to 2 dB of the ordinary
 peak level, 2.5 dB on Punch).
+
+## Windows app (trial)
+
+`desktop/` builds Master Room for Windows from the same engine source as the phone (`app/src/main/java/.../engine`
+and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
+
+- **Build 1:** open or drop a song (WAV and MP3 in Java; FLAC, M4A, AAC, OGG, Opus, AIFF, WMA through the bundled
+  FFmpeg), pick style and loudness, master Clean, Warm and Punch, and see loudness, true peak, the check and the
+  streaming check (MP3 320, MP3 128 and AAC 256, as on the phone). Takes, MP3s and the session sheet go to
+  `Documents\Master Room\<song>\<date time>\`. Command line: `"Master Room.exe"` is the window;
+  `java -jar masterroom.jar --master song.wav [--style ROCK] [--level -14] [--out folder]` runs headless.
+- **Same sound as the phone:** `desktop/check/DesktopCheck.java` masters a test song through the app and through
+  the engine directly and requires byte-identical 24-bit and 16-bit files, plus loudness, ceilings, MP3, FLAC and AAC.
+- **CI:** `.github/workflows/build-windows.yml` compiles and checks on Windows, packages a portable app with Java
+  and FFmpeg included (`MasterRoom-Windows-<version>.zip`, and an MSI when WiX is available) and screenshots the window.
+  The app is not code-signed: Windows SmartScreen asks once (More info → Run anyway).
+- Next builds: A/B player (level-matched, gapless, blind), Console meters and views, stems, references and settings.

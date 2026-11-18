@@ -1,0 +1,118 @@
+name: Master Room for Windows
+
+# Builds the Windows app from the same engine source as the Android app (nothing in app/ changes),
+# checks it on Windows, and packages a portable app with Java and FFmpeg included.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'feature/windows-desktop']
+    paths:
+      - 'desktop/**'
+      - 'app/src/main/java/com/dennis/masterroom/engine/**'
+      - 'app/src/main/java/de/**'
+      - '.github/workflows/build-windows.yml'
+
+permissions:
+  contents: read
+
+env:
+  APP_VERSION: '0.1.0'
+  # FFmpeg LGPL build (BtbN), release branch 7.1. Only ffmpeg.exe and its licence are shipped.
+  FFMPEG_ZIP: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-lgpl-7.1.zip'
+  FONTS: 'https://raw.githubusercontent.com/google/fonts/023eedd8780dd254e5905901473ed55e5475ee73/ofl'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Compile the engine and the Windows app
+        run: |
+          mkdir -p build/desktop/classes build/desktop/check
+          javac -nowarn -encoding UTF-8 --release 21 -d build/desktop/classes \
+            $(find app/src/main/java/com/dennis/masterroom/engine app/src/main/java/de desktop/src -name '*.java')
+          javac -nowarn -encoding UTF-8 --release 21 -cp build/desktop/classes -d build/desktop/check desktop/check/DesktopCheck.java
+
+      - name: Fonts (same pinned Google Fonts commit as the phone)
+        run: |
+          F=build/desktop/classes/fonts; mkdir -p $F
+          curl -fsSL -o $F/Barlow-Regular.ttf $FONTS/barlow/Barlow-Regular.ttf
+          curl -fsSL -o $F/Barlow-SemiBold.ttf $FONTS/barlow/Barlow-SemiBold.ttf
+          curl -fsSL -o $F/BarlowCondensed-SemiBold.ttf $FONTS/barlowcondensed/BarlowCondensed-SemiBold.ttf
+          curl -fsSL -o $F/BarlowCondensed-Bold.ttf $FONTS/barlowcondensed/BarlowCondensed-Bold.ttf
+          curl -fsSL -o $F/JetBrainsMono.ttf "$FONTS/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf"
+          curl -fsSL -o $F/OFL-Barlow.txt $FONTS/barlow/OFL.txt
+          curl -fsSL -o $F/OFL-JetBrainsMono.txt $FONTS/jetbrainsmono/OFL.txt
+
+      - name: FFmpeg (LGPL)
+        run: |
+          curl -fsSL -o ffmpeg.zip "$FFMPEG_ZIP"
+          mkdir -p ffx build/desktop/app/ffmpeg
+          7z x -y -offx ffmpeg.zip > /dev/null
+          cp ffx/*/bin/ffmpeg.exe build/desktop/app/ffmpeg/
+          cp ffx/*/LICENSE.txt build/desktop/app/ffmpeg/LICENSE-FFmpeg-LGPL.txt
+          build/desktop/app/ffmpeg/ffmpeg.exe -hide_banner -version | head -1
+
+      - name: Checks on Windows (parity with the engine, loudness, ceilings, MP3, FLAC, AAC)
+        run: |
+          java -Xmx3g -Dmasterroom.ffmpeg=build/desktop/app/ffmpeg/ffmpeg.exe -cp "build/desktop/classes;build/desktop/check" DesktopCheck 40 "check-song.wav" | tee desktop-check.txt
+          grep -q DESKTOP_CHECK_PASS desktop-check.txt
+
+      - name: Screenshots of the window (Windows fonts and rendering)
+        run: |
+          java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-empty.png
+          java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-results.png --demo
+
+      - name: Package (portable app with Java and FFmpeg included)
+        run: |
+          cp THIRD_PARTY_NOTICES.md desktop/WINDOWS_NOTICES.txt build/desktop/app/
+          jar --create --file build/desktop/app/masterroom.jar --main-class com.dennis.masterroom.desktop.Main -C build/desktop/classes .
+          jpackage --type app-image --name "Master Room" --dest build/desktop/dist \
+            --input build/desktop/app --main-jar masterroom.jar --main-class com.dennis.masterroom.desktop.Main \
+            --app-version "$APP_VERSION" --vendor "Dennis" --description "Master Room mastering for Windows" \
+            --java-options "-Xmx6g" --java-options "-Dfile.encoding=UTF-8"
+          ls "build/desktop/dist/Master Room"
+          test -f "build/desktop/dist/Master Room/app/ffmpeg/ffmpeg.exe"
+          cd build/desktop/dist && 7z a -tzip "../../../MasterRoom-Windows-$APP_VERSION.zip" "Master Room" > /dev/null
+          cd - > /dev/null; ls -la MasterRoom-Windows-*.zip
+
+      - name: Packaged app masters a song (command line through the bundled Java)
+        run: |
+          "build/desktop/dist/Master Room/runtime/bin/java.exe" -cp "build/desktop/dist/Master Room/app/masterroom.jar" \
+            com.dennis.masterroom.desktop.Main --master check-song.wav --out packaged-test --level -14 | tee packaged.txt
+          grep -q "FFmpeg\|AAC 256" packaged.txt
+          grep -c "^TAKE" packaged.txt | grep -q 3
+
+      - name: Installer (MSI, per-user, if WiX is available on the runner)
+        continue-on-error: true
+        run: |
+          jpackage --type msi --name "Master Room" --dest build/desktop/msi \
+            --input build/desktop/app --main-jar masterroom.jar --main-class com.dennis.masterroom.desktop.Main \
+            --app-version "$APP_VERSION" --vendor "Dennis" --description "Master Room mastering for Windows" \
+            --java-options "-Xmx6g" --win-per-user-install --win-menu --win-shortcut --win-dir-chooser
+          cp build/desktop/msi/*.msi "MasterRoom-Windows-$APP_VERSION.msi"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MasterRoom-Windows
+          path: |
+            MasterRoom-Windows-*.zip
+            MasterRoom-Windows-*.msi
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MasterRoom-Windows-checks
+          path: |
+            desktop-check.txt
+            packaged.txt
+            window-*.png
