@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  APP_VERSION: '0.1.0'
+  APP_VERSION: '0.1.1'
   # FFmpeg LGPL builds by BtbN: the newest stable release branch (n<version>-latest-win64-lgpl), looked up at build time.
   # Only ffmpeg.exe and its licence are shipped.
   FFMPEG_REPO: 'BtbN/FFmpeg-Builds'
@@ -77,6 +77,7 @@ jobs:
         run: |
           java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-empty.png
           java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-results.png --demo
+          java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-locked.png --busy
 
       - name: Package (portable app with Java and FFmpeg included)
         run: |

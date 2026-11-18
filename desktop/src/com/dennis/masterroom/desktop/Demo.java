@@ -21,6 +21,7 @@ final class Demo {
         }
         o.seconds = 84;
         o.sheet = "Sample";
+        o.settings = "Classic Rock · -14 LUFS · commercial reference · clean-up on · MP3 320";
         return o;
     }
 }

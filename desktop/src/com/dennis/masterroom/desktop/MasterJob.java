@@ -45,6 +45,8 @@ public final class MasterJob {
         public Listen before;
         public final List<Take> takes = new ArrayList<>();
         public String sheet;
+        /** The settings this round used, in words, e.g. "Classic Rock · -14 LUFS · commercial reference · clean-up on · MP3 320". */
+        public String settings;
         public double seconds;
     }
 
@@ -80,6 +82,11 @@ public final class MasterJob {
         return base.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
     }
 
+    public static String describe(Settings s) {
+        return s.style.label + " · " + String.format(Locale.US, "%.0f LUFS", s.lufs) + " · " + (s.commercial ? "commercial reference" : "built-in tone reference")
+            + " · clean-up " + (s.cleanUp ? "on" : "off") + (s.mp3 ? " · MP3 320" : "");
+    }
+
     /** Asks a running round to stop at its next checkpoint. */
     public static void stop() { Engineer.requestStop(true); }
 
@@ -92,6 +99,7 @@ public final class MasterJob {
         if (!dir.mkdirs() && !dir.isDirectory()) throw new IOException("Could not create " + dir);
         Outcome out = new Outcome();
         out.dir = dir;
+        out.settings = describe(s);
         listener.progress("Opening the song", 0);
         Audio in = open(s.song);
         out.source = new File(dir, "source.wav");
@@ -143,7 +151,7 @@ public final class MasterJob {
         }
         session.release();
         out.seconds = (System.nanoTime() - t0) / 1e9;
-        out.sheet = Engineer.sheet(session, results) + String.format(Locale.US, "%nFinished in %.1f minutes on this computer", out.seconds / 60);
+        out.sheet = "Mastered with: " + out.settings + System.lineSeparator() + System.lineSeparator() + Engineer.sheet(session, results) + String.format(Locale.US, "%nFinished in %.1f minutes on this computer", out.seconds / 60);
         java.nio.file.Files.writeString(new File(dir, "session sheet.txt").toPath(), out.sheet);
         listener.progress("Done. Your takes are ready.", 100);
         return out;

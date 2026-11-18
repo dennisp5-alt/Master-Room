@@ -116,7 +116,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 1 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 1.1 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue());
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -200,6 +200,7 @@ final class MainWindow {
                     results.show(last);
                     progress.setValue(100);
                     status.setText(String.format(Locale.US, "Done in %.1f minutes. Takes are in %s", last.seconds / 60, last.dir.getAbsolutePath()));
+                    status.setToolTipText(last.settings);
                     folder.setEnabled(true); sheet.setEnabled(true);
                 } catch (Exception e) {
                     String m = rootMessage(e);
@@ -249,7 +250,7 @@ final class MainWindow {
     // ---------- Results ----------
     static final class ResultsView extends JComponent {
         private MasterJob.Outcome o;
-        ResultsView() { setPreferredSize(new Dimension(900, 236)); setMaximumSize(new Dimension(Integer.MAX_VALUE, 236)); setMinimumSize(new Dimension(300, 236)); }
+        ResultsView() { setPreferredSize(new Dimension(900, 262)); setMaximumSize(new Dimension(Integer.MAX_VALUE, 262)); setMinimumSize(new Dimension(300, 262)); }
         void show(MasterJob.Outcome o) { this.o = o; repaint(); }
         @Override protected void paintComponent(Graphics g0) {
             Graphics2D g = (Graphics2D) g0.create();
@@ -280,6 +281,11 @@ final class MainWindow {
                 clip(g, t.streaming, x[4], y, w - x[4] - 18, t.streaming.startsWith("Safe") ? Look.BLUE : Look.HOT);
                 g.setFont(Look.size(Look.body, 12)); g.setColor(Look.DIM); g.drawString(t.about, x[0], y + 18);
                 y += 52;
+            }
+            if (o.settings != null) {
+                g.setColor(Look.HAIR); g.drawLine(12, h - 34, w - 12, h - 34);
+                g.setFont(Look.size(Look.body, 13)); g.setColor(Look.MID);
+                g.drawString("Mastered with: " + o.settings, x[0], h - 14);
             }
             g.dispose();
         }
@@ -315,7 +321,8 @@ final class MainWindow {
     }
     private static JCheckBox check(String s, String tip) {
         JCheckBox b = new JCheckBox(s); b.setOpaque(false); b.setForeground(Look.TEXT); b.setFont(Look.size(Look.body, 14)); b.setToolTipText(tip);
-        b.setFocusPainted(false); b.setIcon(new Tick(false)); b.setSelectedIcon(new Tick(true)); b.setIconTextGap(8);
+        b.setFocusPainted(false); b.setIcon(new Tick(false, false)); b.setSelectedIcon(new Tick(true, false));
+        b.setDisabledIcon(new Tick(false, true)); b.setDisabledSelectedIcon(new Tick(true, true)); b.setIconTextGap(8);
         return b;
     }
     private static JButton button(String s, boolean primary) {
@@ -343,8 +350,17 @@ final class MainWindow {
         c.setFont(Look.size(Look.body, 14)); c.setBackground(Look.WELL); c.setForeground(Look.TEXT); c.setBorder(new LineBorder(Look.LINE, 1, true));
         c.setUI(new BasicComboBoxUI() {
             @Override protected JButton createArrowButton() {
-                JButton b = new JButton("▾"); b.setFont(Look.size(Look.body, 14)); b.setForeground(Look.AMBER); b.setBackground(Look.WELL);
-                b.setBorder(new EmptyBorder(0, 8, 0, 8)); b.setContentAreaFilled(false); b.setFocusPainted(false); return b;
+                JButton b = new JButton() {
+                    @Override protected void paintComponent(Graphics g0) {
+                        Graphics2D g = (Graphics2D) g0.create(); g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                        g.setColor(Look.WELL); g.fillRect(0, 0, getWidth(), getHeight());
+                        int cx = getWidth() / 2, cy = getHeight() / 2;
+                        g.setColor(comboBox.isEnabled() ? Look.AMBER : Look.AMBER_DIM);
+                        g.fillPolygon(new int[]{cx - 5, cx + 5, cx}, new int[]{cy - 2, cy - 2, cy + 4}, 3);
+                        g.dispose();
+                    }
+                };
+                b.setPreferredSize(new Dimension(28, 28)); b.setBorder(new EmptyBorder(0, 0, 0, 0)); b.setContentAreaFilled(false); b.setFocusPainted(false); return b;
             }
             @Override public void paintCurrentValueBackground(Graphics g, Rectangle r, boolean f) { g.setColor(Look.WELL); g.fillRect(r.x, r.y, r.width, r.height); }
         });
@@ -357,12 +373,13 @@ final class MainWindow {
                 }
             });
     }
-    private record Tick(boolean on) implements Icon {
+    /** A tick box; dimmed (not hidden) while a round is running and the settings are locked. */
+    private record Tick(boolean on, boolean locked) implements Icon {
         public int getIconWidth() { return 18; } public int getIconHeight() { return 18; }
         public void paintIcon(Component c, Graphics g0, int x, int y) {
             Graphics2D g = (Graphics2D) g0.create(); g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setColor(Look.WELL); g.fillRoundRect(x, y, 17, 17, 5, 5);
-            g.setColor(on ? Look.AMBER : Look.LINE); g.drawRoundRect(x, y, 17, 17, 5, 5);
+            g.setColor(on ? (locked ? Look.AMBER_DIM : Look.AMBER) : Look.LINE); g.drawRoundRect(x, y, 17, 17, 5, 5);
             if (on) { g.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)); g.drawPolyline(new int[]{x + 4, x + 7, x + 13}, new int[]{y + 9, y + 12, y + 5}, 3); }
             g.dispose();
         }
@@ -370,10 +387,11 @@ final class MainWindow {
 
     // ---------- Screenshot (checks) ----------
     /** Paints the window into a PNG without showing it, optionally with sample results. */
-    static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel) throws Exception {
+    static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy) throws Exception {
         MainWindow m = new MainWindow();
         if (songLabel != null) { m.songName.setText(songLabel); m.songFacts.setText("As it came in: -18.2 LUFS, 6.4 LU range, -3.1 dBTP true peak"); m.master.setEnabled(true); }
         if (demo != null) { m.results.show(demo); m.progress.setValue(100); m.status.setText("Done in 1.4 minutes. Takes are in " + demo.dir); m.folder.setEnabled(true); m.sheet.setEnabled(true); }
+        if (busy) { m.song = new File("x.wav"); m.commercial.setSelected(true); m.cleanUp.setSelected(true); m.mp3.setSelected(false); m.setBusy(true); m.progress.setValue(78); m.status.setText("Punch: checking for distortion"); }
         m.root.setSize(w, h);
         layout(m.root);
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
@@ -381,6 +399,8 @@ final class MainWindow {
         m.root.printAll(g);
         g.dispose();
         ImageIO.write(img, "png", png);
+        System.out.println("FONTS title=" + Look.title.getFontName() + " strong=" + Look.strong.getFontName() + " body=" + Look.body.getFontName()
+            + " label=" + Look.label.getFontName() + " mono=" + Look.mono.getFontName() + " | Master button=" + m.master.getFont().getFontName() + " " + m.master.getFont().getSize2D());
     }
     private static void layout(Component c) {
         c.doLayout();
@@ -398,6 +418,8 @@ final class MainWindow {
     }
 
     static void tooltips() {
+        UIManager.put("ComboBox.disabledBackground", Look.WELL); UIManager.put("ComboBox.disabledForeground", Look.DIM);
+        UIManager.put("CheckBox.disabledText", Look.DIM);
         UIManager.put("ToolTip.background", Look.PANEL_TOP); UIManager.put("ToolTip.foreground", Look.TEXT);
         UIManager.put("ToolTip.border", new LineBorder(Look.LINE)); UIManager.put("ToolTip.font", Look.size(Look.body, 13));
         UIManager.put("ComboBox.selectionBackground", Look.PANEL_TOP); UIManager.put("ComboBox.selectionForeground", Look.AMBER);
