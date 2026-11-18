@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  APP_VERSION: '0.2.0'
+  APP_VERSION: '0.2.1'
   # FFmpeg LGPL builds by BtbN: the newest stable release branch (n<version>-latest-win64-lgpl), looked up at build time.
   # Only ffmpeg.exe and its licence are shipped.
   FFMPEG_REPO: 'BtbN/FFmpeg-Builds'

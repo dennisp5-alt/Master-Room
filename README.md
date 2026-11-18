@@ -49,7 +49,7 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
 - **Build 1:** open or drop a song (WAV and MP3 in Java; FLAC, M4A, AAC, OGG, Opus, AIFF, WMA through the bundled
   FFmpeg), pick style and loudness, master Clean, Warm and Punch, and see loudness, true peak, the check and the
   streaming check (MP3 320, MP3 128 and AAC 256, as on the phone). Takes, MP3s and the session sheet go to
-  `Documents\Master Room\<song>\<date time>\`. Command line: `"Master Room.exe"` is the window;
+  `Documents\Master Room\<song>\<date time>\` (or the folder chosen with Change). Command line: `"Master Room.exe"` is the window;
   `"Master Room CLI.exe" --master song.wav [--style ROCK] [--level -14] [--out folder]` runs headless.
 - **Same sound as the phone:** `desktop/check/DesktopCheck.java` masters a test song through the app and through
   the engine directly and requires byte-identical 24-bit and 16-bit files, plus loudness, ceilings, MP3, FLAC and AAC.
@@ -62,4 +62,6 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   PLAYS AT column shows each trim. Keys: Space play/pause, 1-4 versions, M level match, arrows 5 s, Home to start.
   Blind test as on the phone: shuffled, names hidden, matched; pick, then see which it was. Picks are added to
   `Documents\Master Room\blind test picks.txt`. `PlayerCheck` checks matching, crossfades and exact playback.
+- **Build 2.1:** rounds go to the Documents folder Windows actually uses (it can be moved to OneDrive or another
+  drive), and **Change** next to Master picks any other folder (remembered).
 - Next builds: Console meters and views, stems, references and settings, polish.

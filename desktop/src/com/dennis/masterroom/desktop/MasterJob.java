@@ -54,9 +54,35 @@ public final class MasterJob {
 
     public interface Listener { void progress(String step, int percent); }
 
+    private static File documents;
+
+    /** Master Room inside the user's real Documents folder (wherever Windows has it), unless they chose another. */
     public static File defaultOutRoot() {
-        File docs = new File(System.getProperty("user.home"), "Documents");
-        return new File(docs.isDirectory() ? docs : new File(System.getProperty("user.home")), "Master Room");
+        return new File(documents(), "Master Room");
+    }
+
+    /**
+     * The Documents folder Explorer shows. Windows lets it move (OneDrive, another drive, a restored PC), so ask
+     * Windows rather than assuming <home>\Documents. Falls back to <home>\Documents, then the home folder.
+     */
+    public static synchronized File documents() {
+        if (documents != null) return documents;
+        File home = new File(System.getProperty("user.home"));
+        if (System.getProperty("os.name", "").startsWith("Windows")) {
+            try {
+                Process p = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command",
+                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath('MyDocuments')")
+                    .redirectErrorStream(true).start();
+                p.getOutputStream().close();
+                String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).strip();
+                if (p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS) && p.exitValue() == 0 && !out.isEmpty() && !out.contains("\n")) {
+                    File d = new File(out);
+                    if (d.isDirectory()) return documents = d;
+                }
+            } catch (Exception ignored) { }
+        }
+        File d = new File(home, "Documents");
+        return documents = d.isDirectory() ? d : home;
     }
 
     public static String extension(File f) {

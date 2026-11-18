@@ -85,6 +85,10 @@ public final class DesktopCheck {
             ok(back.l.length == orig.l.length && back.rate == orig.rate && worst < 1e-6, String.format(Locale.US, "FLAC opens losslessly (worst difference %.2e)", worst));
             ok(app.takes.get(0).streaming.contains("AAC 256"), "AAC streaming check ran: " + app.takes.get(0).streaming);
         }
+        // Where rounds go by default: the Documents folder Windows reports (it can be moved).
+        ok(MasterJob.documents().isDirectory() && MasterJob.defaultOutRoot().getParentFile().equals(MasterJob.documents()),
+            "rounds go to " + MasterJob.defaultOutRoot());
+
         // 4. Build 2: the comparison player on this round.
         fails += com.dennis.masterroom.desktop.PlayerCheck.run(app);
 

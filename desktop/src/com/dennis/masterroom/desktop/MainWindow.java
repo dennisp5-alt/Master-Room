@@ -43,7 +43,9 @@ final class MainWindow {
     private final JCheckBox cleanUp = check("Clean-up", "Turns down narrow resonances while they ring and eases stray top-end specks");
     private final JCheckBox mp3 = check("MP3 320", "Also writes a tagged 320 kbps MP3 of each take");
     private final JButton open = button("Open song", false), master = button("Master", true), stop = button("Stop", false);
-    private final JButton folder = button("Open folder", false), sheet = button("Session sheet", false);
+    private final JButton folder = button("Open folder", false), sheet = button("Session sheet", false), saveTo = button("Change", false);
+    private final JLabel saveLine = text("", Look.size(Look.body, 13), Look.DIM);
+    private File outRoot;
     private final JProgressBar progress = new JProgressBar(0, 100);
     private final JLabel status = text(" ", Look.size(Look.body, 14), Look.MID);
     private final ResultsView results = new ResultsView();
@@ -111,6 +113,8 @@ final class MainWindow {
         stop.addActionListener(e -> { MasterJob.stop(); status.setText("Stopping at the next safe point…"); });
         folder.addActionListener(e -> { if (last != null) openFolder(last.dir); });
         sheet.addActionListener(e -> showSheet());
+        saveTo.addActionListener(e -> chooseOutRoot());
+        saveTo.setToolTipText("Choose the folder rounds are saved in");
         play.addActionListener(e -> togglePlay());
         blindTest.addActionListener(e -> blindStep());
         match.setSelected(true);
@@ -134,7 +138,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 2 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 2.1 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -168,6 +172,9 @@ final class MainWindow {
     private JComponent actionRow() {
         JPanel r = row();
         master.setPreferredSize(new Dimension(170, 42)); r.add(master); r.add(Box.createHorizontalStrut(10)); r.add(stop);
+        r.add(Box.createHorizontalStrut(22));
+        r.add(saveLine); r.add(Box.createHorizontalStrut(8));
+        saveTo.setPreferredSize(new Dimension(84, 34)); saveTo.setMaximumSize(saveTo.getPreferredSize()); r.add(saveTo);
         r.add(Box.createHorizontalGlue());
         r.add(folder); r.add(Box.createHorizontalStrut(10)); r.add(sheet);
         return r;
@@ -181,7 +188,7 @@ final class MainWindow {
         blindTest.setToolTipText("Hides the names, shuffles the order and matches levels. Pick the one you like, then see which it was.");
         r.add(play); r.add(Box.createHorizontalStrut(12)); r.add(wave); r.add(Box.createHorizontalStrut(14));
         r.add(match); r.add(Box.createHorizontalStrut(12)); r.add(blindTest);
-        for (AbstractButton b : new AbstractButton[]{play, blindTest, match, open, master, stop, folder, sheet, commercial, cleanUp, mp3}) b.setFocusable(false);
+        for (AbstractButton b : new AbstractButton[]{play, blindTest, match, open, master, stop, folder, sheet, saveTo, commercial, cleanUp, mp3}) b.setFocusable(false);
         return r;
     }
 
@@ -219,6 +226,7 @@ final class MainWindow {
         MasterJob.Settings s = new MasterJob.Settings();
         s.song = song; s.style = (Target.Style) style.getSelectedItem(); s.lufs = LEVELS[level.getSelectedIndex()];
         s.commercial = commercial.isSelected(); s.cleanUp = cleanUp.isSelected(); s.mp3 = mp3.isSelected();
+        s.outRoot = outRoot;
         stopListening();
         setBusy(true);
         results.show(null);
@@ -246,7 +254,7 @@ final class MainWindow {
 
     private void setBusy(boolean on) {
         busy = on;
-        master.setEnabled(!on && song != null); open.setEnabled(!on); stop.setEnabled(on);
+        master.setEnabled(!on && song != null); open.setEnabled(!on); stop.setEnabled(on); saveTo.setEnabled(!on);
         style.setEnabled(!on); level.setEnabled(!on); commercial.setEnabled(!on); cleanUp.setEnabled(!on); mp3.setEnabled(!on);
     }
 
@@ -400,6 +408,30 @@ final class MainWindow {
         return false;
     }
 
+    private void chooseOutRoot() {
+        JFileChooser fc = new JFileChooser(outRoot.isDirectory() ? outRoot : outRoot.getParentFile());
+        fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        fc.setDialogTitle("Save rounds in");
+        fc.setApproveButtonText("Save here");
+        if (fc.showOpenDialog(root) != JFileChooser.APPROVE_OPTION || fc.getSelectedFile() == null) return;
+        setOutRoot(fc.getSelectedFile());
+        PREFS.put("outRoot", outRoot.getAbsolutePath());
+        status.setText("New rounds will be saved in " + outRoot.getAbsolutePath());
+    }
+
+    private void setOutRoot(File f) {
+        outRoot = f;
+        saveLine.setText("Saving to " + shortPath(f));
+        saveLine.setToolTipText(f.getAbsolutePath());
+    }
+
+    /** C:\Users\denni\Documents\Master Room → Documents\Master Room when it is the usual place; long paths shortened in the middle. */
+    static String shortPath(File f) {
+        String p = f.getAbsolutePath(), docs = MasterJob.documents().getAbsolutePath();
+        if (p.startsWith(docs + File.separator)) p = MasterJob.documents().getName() + p.substring(docs.length());
+        return p.length() <= 46 ? p : p.substring(0, 18) + "…" + p.substring(p.length() - 26);
+    }
+
     private void showSheet() {
         if (last == null) return;
         JTextArea t = new JTextArea(last.sheet, 30, 90);
@@ -417,6 +449,8 @@ final class MainWindow {
         try { style.setSelectedItem(Target.Style.valueOf(PREFS.get("style", "COUNTRY"))); } catch (Exception e) { style.setSelectedItem(Target.Style.COUNTRY); }
         double lv = PREFS.getDouble("level", -14);
         for (int i = 0; i < LEVELS.length; i++) if (LEVELS[i] == lv) level.setSelectedIndex(i);
+        String chosen = PREFS.get("outRoot", "");
+        setOutRoot(!chosen.isEmpty() && new File(chosen).isDirectory() ? new File(chosen) : MasterJob.defaultOutRoot());
         commercial.setSelected(PREFS.getBoolean("commercial", false)); cleanUp.setSelected(PREFS.getBoolean("cleanUp", true)); mp3.setSelected(PREFS.getBoolean("mp3", true));
     }
 
