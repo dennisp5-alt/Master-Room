@@ -11,6 +11,7 @@ import java.util.*;
  *     directly, as the phone and tools/Cli.java call it. The window adds no processing.
  *  2. Each take meets its loudness and true-peak ceiling.
  *  3. Inputs: MP3 (engine decoder) and, when FFmpeg is present, FLAC (lossless round trip).
+ *  4. The A/B player: level matching, crossfades, playback exactness, blind test (PlayerCheck).
  * Usage: java -cp <classes>:desktop/check DesktopCheck [seconds] [copy-of-test-song.wav]
  */
 public final class DesktopCheck {
@@ -84,6 +85,9 @@ public final class DesktopCheck {
             ok(back.l.length == orig.l.length && back.rate == orig.rate && worst < 1e-6, String.format(Locale.US, "FLAC opens losslessly (worst difference %.2e)", worst));
             ok(app.takes.get(0).streaming.contains("AAC 256"), "AAC streaming check ran: " + app.takes.get(0).streaming);
         }
+        // 4. Build 2: the comparison player on this round.
+        fails += com.dennis.masterroom.desktop.PlayerCheck.run(app);
+
         System.out.printf(Locale.US, "Mastered %d s of audio in %.1f s%n", seconds, app.seconds);
         if (fails > 0) { System.out.println(fails + " desktop check(s) failed"); System.exit(1); }
         System.out.println("DESKTOP_CHECK_PASS");

@@ -19,6 +19,7 @@ final class Demo {
             t.verdict = r[4]; t.streaming = r[5]; t.files = new File[0];
             o.takes.add(t);
         }
+        o.beforeLufs = -18.2; o.beforePeak = -3.1;
         o.seconds = 84;
         o.sheet = "Sample";
         o.settings = "Classic Rock · -14 LUFS · commercial reference · clean-up on · MP3 320";

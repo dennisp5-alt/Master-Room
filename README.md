@@ -56,4 +56,10 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
 - **CI:** `.github/workflows/build-windows.yml` compiles and checks on Windows, packages a portable app with Java
   and FFmpeg included (`MasterRoom-Windows-<version>.zip`, and an MSI when WiX is available) and screenshots the window.
   The app is not code-signed: Windows SmartScreen asks once (More info → Run anyway).
-- Next builds: A/B player (level-matched, gapless, blind), Console meters and views, stems, references and settings.
+- **Build 2, listening:** after a round, play the Original and the three takes against each other. Switching keeps
+  your place and crossfades over one 2048-sample block; level match (on by default, playback only) uses the phone's
+  rule, so every version plays at the masters' level and the original comes up only as far as its peak allows. The
+  PLAYS AT column shows each trim. Keys: Space play/pause, 1-4 versions, M level match, arrows 5 s, Home to start.
+  Blind test as on the phone: shuffled, names hidden, matched; pick, then see which it was. Picks are added to
+  `Documents\Master Room\blind test picks.txt`. `PlayerCheck` checks matching, crossfades and exact playback.
+- Next builds: Console meters and views, stems, references and settings, polish.

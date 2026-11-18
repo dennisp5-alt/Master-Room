@@ -12,18 +12,23 @@ import javax.swing.plaf.basic.BasicComboBoxUI;
 import javax.swing.plaf.basic.BasicProgressBarUI;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Random;
 import java.util.prefs.Preferences;
 
 /**
- * Build 1 window: pick or drop a song, choose style and level, master the three takes,
- * see each take's loudness, true peak and checks, open the folder. A/B listening, meters and
- * stems come in the next builds.
+ * Pick or drop a song, choose style and level, master the three takes, see each take's loudness,
+ * true peak and checks. Build 2: play the original and the takes against each other, level-matched,
+ * switching without a gap, with the phone's blind test. Meters and stems come in the next builds.
  */
 final class MainWindow {
     private static final Preferences PREFS = Preferences.userNodeForPackage(MainWindow.class);
@@ -43,6 +48,16 @@ final class MainWindow {
     private final JLabel status = text(" ", Look.size(Look.body, 14), Look.MID);
     private final ResultsView results = new ResultsView();
     private final JLabel engineLine = text("", Look.size(Look.mono, 12), Look.DIM);
+    // Listening (build 2)
+    private final AbPlayer player = new AbPlayer();
+    private final Blind blind = new Blind(new Random());
+    private final JButton play = button("Play", false), blindTest = button("Blind test", false);
+    private final JCheckBox match = check("Level match", "Plays every version at the masters' level, so you hear the difference in sound, not in loudness. Playback only: no file changes.");
+    private final Wave wave = new Wave();
+    /** One per version, in the player's order: Original, then the takes. */
+    private List<Row> rows = List.of();
+    private int playing;
+    private boolean listening;
     private File song;
     private MasterJob.Outcome last;
     private boolean busy;
@@ -61,14 +76,11 @@ final class MainWindow {
         middle.add(progress);
         middle.add(gap(6));
         middle.add(status);
-        middle.add(gap(14));
+        middle.add(gap(12));
         results.setAlignmentX(0);
         middle.add(results);
         middle.add(gap(10));
-        JPanel bottom = row();
-        bottom.add(folder); bottom.add(Box.createHorizontalStrut(10)); bottom.add(sheet);
-        bottom.add(Box.createHorizontalGlue()); bottom.add(engineLine);
-        middle.add(bottom);
+        middle.add(transport());
         middle.add(Box.createVerticalGlue());
         root.add(middle, BorderLayout.CENTER);
 
@@ -99,6 +111,12 @@ final class MainWindow {
         stop.addActionListener(e -> { MasterJob.stop(); status.setText("Stopping at the next safe point…"); });
         folder.addActionListener(e -> { if (last != null) openFolder(last.dir); });
         sheet.addActionListener(e -> showSheet());
+        play.addActionListener(e -> togglePlay());
+        blindTest.addActionListener(e -> blindStep());
+        match.setSelected(true);
+        match.addActionListener(e -> matchChanged());
+        player.onStop(() -> SwingUtilities.invokeLater(this::refreshTransport));
+        setListening(false);
         engineLine.setText(Ffmpeg.available() ? "FFmpeg ready: FLAC, M4A, AAC and the AAC streaming check" : "FFmpeg not found: WAV and MP3 only");
         root.setTransferHandler(new TransferHandler() {
             @Override public boolean canImport(TransferSupport s) { return !busy && s.isDataFlavorSupported(DataFlavor.javaFileListFlavor); }
@@ -116,8 +134,8 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 1.1 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
-        h.add(t); h.add(s); h.add(Box.createHorizontalGlue());
+        JLabel s = text("   Windows trial · build 2 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
     }
@@ -151,6 +169,19 @@ final class MainWindow {
         JPanel r = row();
         master.setPreferredSize(new Dimension(170, 42)); r.add(master); r.add(Box.createHorizontalStrut(10)); r.add(stop);
         r.add(Box.createHorizontalGlue());
+        r.add(folder); r.add(Box.createHorizontalStrut(10)); r.add(sheet);
+        return r;
+    }
+
+    private JComponent transport() {
+        JPanel r = row();
+        play.setPreferredSize(new Dimension(110, 40)); play.setMaximumSize(play.getPreferredSize());
+        blindTest.setPreferredSize(new Dimension(150, 40)); blindTest.setMaximumSize(blindTest.getPreferredSize());
+        play.setToolTipText("Play or pause (Space). 1 to 4 switch versions without stopping.");
+        blindTest.setToolTipText("Hides the names, shuffles the order and matches levels. Pick the one you like, then see which it was.");
+        r.add(play); r.add(Box.createHorizontalStrut(12)); r.add(wave); r.add(Box.createHorizontalStrut(14));
+        r.add(match); r.add(Box.createHorizontalStrut(12)); r.add(blindTest);
+        for (AbstractButton b : new AbstractButton[]{play, blindTest, match, open, master, stop, folder, sheet, commercial, cleanUp, mp3}) b.setFocusable(false);
         return r;
     }
 
@@ -188,6 +219,7 @@ final class MainWindow {
         MasterJob.Settings s = new MasterJob.Settings();
         s.song = song; s.style = (Target.Style) style.getSelectedItem(); s.lufs = LEVELS[level.getSelectedIndex()];
         s.commercial = commercial.isSelected(); s.cleanUp = cleanUp.isSelected(); s.mp3 = mp3.isSelected();
+        stopListening();
         setBusy(true);
         results.show(null);
         new SwingWorker<MasterJob.Outcome, Object[]>() {
@@ -202,6 +234,7 @@ final class MainWindow {
                     status.setText(String.format(Locale.US, "Done in %.1f minutes. Takes are in %s", last.seconds / 60, last.dir.getAbsolutePath()));
                     status.setToolTipText(last.settings);
                     folder.setEnabled(true); sheet.setEnabled(true);
+                    loadListening(last);
                 } catch (Exception e) {
                     String m = rootMessage(e);
                     status.setText(m.contains("Stopped") ? "Stopped. Nothing was finished from this round." : "It did not finish: " + m);
@@ -215,6 +248,156 @@ final class MainWindow {
         busy = on;
         master.setEnabled(!on && song != null); open.setEnabled(!on); stop.setEnabled(on);
         style.setEnabled(!on); level.setEnabled(!on); commercial.setEnabled(!on); cleanUp.setEnabled(!on); mp3.setEnabled(!on);
+    }
+
+    // ---------- Listening ----------
+    record Row(String name, String about, double lufs, double peak, double ceiling, String verdict, String streaming, boolean original) {}
+
+    static List<Row> rowsFor(MasterJob.Outcome o) {
+        List<Row> r = new ArrayList<>();
+        r.add(new Row("Original", "The song as it came in, before mastering", o.beforeLufs, o.beforePeak, Double.NaN, "As it came in", "", true));
+        for (MasterJob.Take t : o.takes) r.add(new Row(t.label, t.about, t.lufs, t.truePeak, t.ceiling, t.verdict, t.streaming, false));
+        return r;
+    }
+
+    /** Playback trim per version (dB) with level match on: the same rule the player uses. */
+    private double[] trims() {
+        double[] lufs = new double[rows.size()], peak = new double[rows.size()];
+        boolean[] master = new boolean[rows.size()];
+        for (int i = 0; i < rows.size(); i++) { lufs[i] = rows.get(i).lufs; peak[i] = rows.get(i).peak; master[i] = !rows.get(i).original; }
+        return AbMixer.matchDb(lufs, peak, master);
+    }
+
+    private void showRows(List<Row> r) {
+        rows = r; blind.reset(r.size()); playing = 0;
+        match.setSelected(true); match.setEnabled(true); blindTest.setText("Blind test");
+        results.repaint();
+    }
+
+    /** Opens the original and the 24-bit takes for playback (files are only read). */
+    private void loadListening(MasterJob.Outcome o) {
+        showRows(rowsFor(o));
+        status.setToolTipText(o.settings);
+        new SwingWorker<float[], Void>() {
+            @Override protected float[] doInBackground() throws Exception {
+                player.mix.clear();
+                player.mix.add(new AbMixer.Version("Original", o.source, o.beforeLufs, o.beforePeak, false));
+                for (MasterJob.Take t : o.takes) player.mix.add(new AbMixer.Version(t.label, t.files[0], t.lufs, t.truePeak, true));
+                player.mix.setMatched(true);
+                player.mix.select(0);
+                return Overview.peaks(o.source, 1600);
+            }
+            @Override protected void done() {
+                try {
+                    wave.peaks = get();
+                    setListening(true);
+                } catch (Exception e) {
+                    player.mix.clear();
+                    status.setText("Listening is not available for this round: " + rootMessage(e));
+                }
+            }
+        }.execute();
+    }
+
+    private void stopListening() {
+        player.pause();
+        player.mix.clear();
+        wave.peaks = null;
+        rows = List.of();
+        blind.reset(0);
+        setListening(false);
+    }
+
+    private void setListening(boolean on) {
+        listening = on;
+        play.setEnabled(on); blindTest.setEnabled(on); match.setEnabled(on && blind.state == Blind.State.OFF);
+        wave.setEnabled(on);
+        refreshTransport();
+    }
+
+    private void refreshTransport() {
+        play.setText(player.isPlaying() ? "Pause" : "Play");
+        if (player.problem() != null) status.setText(player.problem());
+        wave.repaint();
+    }
+
+    private void togglePlay() {
+        if (!listening) return;
+        if (player.isPlaying()) player.pause(); else player.play();
+        refreshTransport();
+    }
+
+    /** A row on screen (0 = top). During the blind test rows hold shuffled versions. */
+    private void selectRow(int r) {
+        if (!listening || r < 0 || r >= rows.size()) return;
+        playing = blind.version(r);
+        player.mix.select(playing);
+        results.repaint();
+    }
+
+    private void seekBy(double seconds) {
+        if (!listening) return;
+        double len = player.mix.length();
+        if (len > 0) player.mix.seek((player.mix.seconds() + seconds) / len);
+        wave.repaint();
+    }
+
+    private void matchChanged() {
+        if (blind.state != Blind.State.OFF) { match.setSelected(true); return; }
+        player.mix.setMatched(match.isSelected());
+        results.repaint();
+    }
+
+    private void blindStep() {
+        if (!listening) return;
+        switch (blind.state) {
+            case OFF -> {
+                playing = blind.start(blind.row(playing), match.isSelected());
+                player.mix.select(playing);
+                match.setSelected(true); match.setEnabled(false); player.mix.setMatched(true);
+                blindTest.setText("Pick this one");
+                status.setText("Blind test: names hidden, order shuffled, levels matched. Listen with 1 to " + rows.size() + ", then Pick this one.");
+            }
+            case ON -> {
+                int row = blind.row(playing);
+                int v = blind.pick(row);
+                blindTest.setText("Finish");
+                String note;
+                try {
+                    StringBuilder names = new StringBuilder();
+                    for (Row x : rows) names.append(names.length() == 0 ? "" : ", ").append(x.name);
+                    File f = Blind.log(last.dir.getParentFile().getParentFile(), last.dir.getParentFile().getName(), last.settings, rows.get(v).name, names.toString());
+                    note = " Saved to " + f.getName() + ".";
+                } catch (Exception e) {
+                    note = " (Could not save the pick: " + rootMessage(e) + ")";
+                }
+                status.setText("You picked Version " + (row + 1) + ": " + rows.get(v).name + "." + note);
+            }
+            case RESULTS -> {
+                blind.finish(playing);
+                match.setSelected(blind.matchedBefore); match.setEnabled(true); player.mix.setMatched(blind.matchedBefore);
+                blindTest.setText("Blind test");
+                status.setText("Back in the usual order.");
+            }
+        }
+        results.repaint();
+    }
+
+    /** Space, 1 to 4, M, arrows: work wherever focus is in the window (not in dialogs or open lists). */
+    private boolean key(KeyEvent e, Window frame) {
+        if (e.getID() != KeyEvent.KEY_PRESSED || !listening || e.isControlDown() || e.isAltDown()) return false;
+        Component c = e.getComponent();
+        Window w = c instanceof Window cw ? cw : SwingUtilities.getWindowAncestor(c);
+        if (w != frame || style.isPopupVisible() || level.isPopupVisible()) return false;
+        int k = e.getKeyCode();
+        if (k == KeyEvent.VK_SPACE) { togglePlay(); return true; }
+        if (k >= KeyEvent.VK_1 && k <= KeyEvent.VK_9) { selectRow(k - KeyEvent.VK_1); return true; }
+        if (k >= KeyEvent.VK_NUMPAD1 && k <= KeyEvent.VK_NUMPAD9) { selectRow(k - KeyEvent.VK_NUMPAD1); return true; }
+        if (k == KeyEvent.VK_M) { if (match.isEnabled()) match.doClick(); return true; }
+        if (k == KeyEvent.VK_LEFT) { seekBy(-5); return true; }
+        if (k == KeyEvent.VK_RIGHT) { seekBy(5); return true; }
+        if (k == KeyEvent.VK_HOME) { player.mix.seek(0); wave.repaint(); return true; }
+        return false;
     }
 
     private void showSheet() {
@@ -248,10 +431,18 @@ final class MainWindow {
     }
 
     // ---------- Results ----------
-    static final class ResultsView extends JComponent {
+    private static final int TOP = 46, ROW = 46;
+
+    final class ResultsView extends JComponent {
         private MasterJob.Outcome o;
-        ResultsView() { setPreferredSize(new Dimension(900, 262)); setMaximumSize(new Dimension(Integer.MAX_VALUE, 262)); setMinimumSize(new Dimension(300, 262)); }
-        void show(MasterJob.Outcome o) { this.o = o; repaint(); }
+        ResultsView() {
+            int h = TOP + 4 * ROW + 40;
+            setPreferredSize(new Dimension(900, h)); setMaximumSize(new Dimension(Integer.MAX_VALUE, h)); setMinimumSize(new Dimension(300, h));
+            addMouseListener(new MouseAdapter() {
+                @Override public void mousePressed(MouseEvent e) { if (e.getY() >= TOP) selectRow((e.getY() - TOP) / ROW); }
+            });
+        }
+        void show(MasterJob.Outcome o) { this.o = o; if (o == null) rows = List.of(); repaint(); }
         @Override protected void paintComponent(Graphics g0) {
             Graphics2D g = (Graphics2D) g0.create();
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -259,28 +450,43 @@ final class MainWindow {
             int w = getWidth(), h = getHeight();
             g.setColor(Look.PANEL); g.fillRoundRect(0, 0, w - 1, h - 1, 14, 14);
             g.setColor(Look.HAIR); g.drawRoundRect(0, 0, w - 1, h - 1, 14, 14);
-            int[] x = {18, 150, 260, 380, 700};
+            int[] x = {18, 172, 280, 388, 486, 736};
             g.setFont(Look.size(Look.label, 13)); g.setColor(Look.AMBER_DIM);
-            String[] heads = {"TAKE", "LOUDNESS", "TRUE PEAK", "CHECK", "STREAMING"};
+            String[] heads = {"VERSION", "LOUDNESS", "TRUE PEAK", "PLAYS AT", "CHECK", "STREAMING"};
             for (int i = 0; i < heads.length; i++) g.drawString(heads[i], x[i], 28);
             g.setColor(Look.HAIR); g.drawLine(12, 40, w - 12, 40);
-            if (o == null) {
+            if (o == null || rows.isEmpty()) {
                 g.setFont(Look.size(Look.body, 15)); g.setColor(Look.DIM);
-                g.drawString("Your Clean, Warm and Punch takes appear here.", 18, 78);
+                g.drawString("Your Clean, Warm and Punch takes appear here, ready to play against the original.", 18, 78);
                 g.dispose(); return;
             }
-            int y = 72;
-            for (MasterJob.Take t : o.takes) {
-                g.setFont(Look.size(Look.strong, 17)); g.setColor(Look.TEXT); g.drawString(t.label, x[0], y);
+            double[] trim = trims();
+            boolean matched = match.isSelected(), hide = blind.hidden(), reveal = blind.state == Blind.State.RESULTS;
+            for (int r = 0; r < rows.size() && r < 4; r++) {
+                int v = blind.version(r);
+                Row t = rows.get(v);
+                int top = TOP + r * ROW, y = top + 21;
+                boolean sel = v == playing;
+                if (sel) {
+                    g.setColor(Look.PANEL_TOP); g.fillRoundRect(8, top, w - 16, ROW - 4, 10, 10);
+                    g.setColor(Look.AMBER); g.fillRoundRect(8, top + 7, 3, ROW - 18, 3, 3);
+                }
+                g.setFont(Look.size(Look.mono, 13)); g.setColor(sel ? Look.AMBER : Look.DIM); g.drawString(String.valueOf(r + 1), x[0], y);
+                g.setFont(Look.size(Look.strong, 17)); g.setColor(sel ? Look.AMBER : Look.TEXT);
+                g.drawString(hide ? "Version " + (r + 1) : t.name, x[0] + 20, y);
+                String about = hide ? "Name hidden until you pick" : reveal ? (r == blind.picked ? "Version " + (r + 1) + ", your pick" : "Version " + (r + 1)) : t.about;
+                g.setFont(Look.size(Look.body, 12)); g.setColor(reveal && r == blind.picked ? Look.AMBER : Look.DIM);
+                clip(g, about, x[0] + 20, y + 17, x[1] - x[0] - 30 + (hide || reveal ? 200 : 300), g.getColor());
+                if (hide) continue;
                 g.setFont(Look.size(Look.mono, 14)); g.setColor(Look.MID);
                 g.drawString(String.format(Locale.US, "%.1f LUFS", t.lufs), x[1], y);
-                g.setColor(t.truePeak <= t.ceiling + 0.05 ? Look.MID : Look.HOT);
-                g.drawString(String.format(Locale.US, "%.1f dBTP", t.truePeak), x[2], y);
+                g.setColor(t.original || t.peak <= t.ceiling + 0.05 ? Look.MID : Look.HOT);
+                g.drawString(String.format(Locale.US, "%.1f dBTP", t.peak), x[2], y);
+                g.setColor(matched ? Look.BLUE : Look.DIM);
+                g.drawString(!matched ? "as is" : Math.abs(trim[v]) < 0.05 ? "0.0 dB" : String.format(Locale.US, "%+.1f dB", trim[v]), x[3], y);
                 g.setFont(Look.size(Look.body, 14));
-                clip(g, t.verdict, x[3], y, x[4] - x[3] - 16, t.verdict.toLowerCase(Locale.ROOT).contains("passed") ? Look.BLUE : Look.HOT);
-                clip(g, t.streaming, x[4], y, w - x[4] - 18, t.streaming.startsWith("Safe") ? Look.BLUE : Look.HOT);
-                g.setFont(Look.size(Look.body, 12)); g.setColor(Look.DIM); g.drawString(t.about, x[0], y + 18);
-                y += 52;
+                clip(g, t.verdict, x[4], y, x[5] - x[4] - 16, t.original ? Look.DIM : t.verdict.toLowerCase(Locale.ROOT).contains("passed") ? Look.BLUE : Look.HOT);
+                clip(g, t.streaming, x[5], y, w - x[5] - 18, t.streaming.startsWith("Safe") ? Look.BLUE : Look.HOT);
             }
             if (o.settings != null) {
                 g.setColor(Look.HAIR); g.drawLine(12, h - 34, w - 12, h - 34);
@@ -289,14 +495,67 @@ final class MainWindow {
             }
             g.dispose();
         }
-        private static void clip(Graphics2D g, String s, int x, int y, int width, Color c) {
-            if (s == null) s = "";
-            FontMetrics fm = g.getFontMetrics();
-            String out = s;
-            while (out.length() > 3 && fm.stringWidth(out) > width) out = out.substring(0, out.length() - 2);
-            if (!out.equals(s)) out = out.substring(0, Math.max(0, out.length() - 1)) + "…";
-            g.setColor(c); g.drawString(out, x, y);
+    }
+
+    private static void clip(Graphics2D g, String s, int x, int y, int width, Color c) {
+        if (s == null) s = "";
+        FontMetrics fm = g.getFontMetrics();
+        String out = s;
+        while (out.length() > 3 && fm.stringWidth(out) > width) out = out.substring(0, out.length() - 2);
+        if (!out.equals(s)) out = out.substring(0, Math.max(0, out.length() - 1)) + "…";
+        g.setColor(c); g.drawString(out, x, y);
+    }
+
+    /** The song's waveform with the play position; click or drag to move it. Time on the right. */
+    final class Wave extends JComponent {
+        float[] peaks;
+        double demoAt = -1, demoLength;
+        Wave() {
+            setPreferredSize(new Dimension(400, 40)); setMaximumSize(new Dimension(Integer.MAX_VALUE, 40)); setMinimumSize(new Dimension(160, 40));
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            MouseAdapter seek = new MouseAdapter() {
+                @Override public void mousePressed(MouseEvent e) { go(e); }
+                @Override public void mouseDragged(MouseEvent e) { go(e); }
+                private void go(MouseEvent e) { if (!listening) return; player.mix.seek((e.getX() - 4) / (double) Math.max(1, area() - 8)); repaint(); }
+            };
+            addMouseListener(seek); addMouseMotionListener(seek);
+            setToolTipText("Click or drag to move. Left and right arrows: 5 seconds.");
         }
+        private int area() { return getWidth() - 112; }
+        @Override protected void paintComponent(Graphics g0) {
+            Graphics2D g = (Graphics2D) g0.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB);
+            int w = area(), h = getHeight(), mid = h / 2;
+            g.setColor(Look.WELL); g.fillRoundRect(0, 0, w, h - 1, 10, 10);
+            g.setColor(Look.HAIR); g.drawRoundRect(0, 0, w, h - 1, 10, 10);
+            double at = demoAt >= 0 ? demoAt : listening ? player.mix.fraction() : 0;
+            double len = demoAt >= 0 ? demoLength : listening ? player.mix.length() : 0;
+            int head = 4 + (int) Math.round(at * (w - 8));
+            if (peaks == null) {
+                g.setColor(Look.HAIR); g.drawLine(6, mid, w - 6, mid);
+            } else {
+                for (int px = 4; px < w - 4; px++) {
+                    int a = (int) ((long) (px - 4) * peaks.length / (w - 8)), b = Math.max(a + 1, (int) ((long) (px - 3) * peaks.length / (w - 8)));
+                    float p = 0;
+                    for (int i = a; i < b && i < peaks.length; i++) p = Math.max(p, peaks[i]);
+                    int half = Math.max(1, Math.round(Math.min(1f, p) * (mid - 4)));
+                    g.setColor(px <= head ? Look.GOLD_LO : isEnabled() ? Look.LINE : Look.HAIR);
+                    g.drawLine(px, mid - half, px, mid + half);
+                }
+            }
+            if (isEnabled() || demoAt >= 0) { g.setColor(Look.TEXT); g.fillRect(head - 1, 3, 2, h - 6); }
+            g.setFont(Look.size(Look.mono, 13)); g.setColor(len > 0 ? Look.MID : Look.DIM);
+            String time = len > 0 ? clock(at * len) + " / " + clock(len) : "-:-- / -:--";
+            FontMetrics fm = g.getFontMetrics();
+            g.drawString(time, getWidth() - fm.stringWidth(time), (h + fm.getAscent() - fm.getDescent()) / 2);
+            g.dispose();
+        }
+    }
+
+    static String clock(double seconds) {
+        int s = (int) Math.max(0, seconds);
+        return s / 60 + ":" + String.format(Locale.US, "%02d", s % 60);
     }
 
     // ---------- Small parts ----------
@@ -387,10 +646,23 @@ final class MainWindow {
 
     // ---------- Screenshot (checks) ----------
     /** Paints the window into a PNG without showing it, optionally with sample results. */
-    static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy) throws Exception {
+    static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy, boolean blindOn) throws Exception {
         MainWindow m = new MainWindow();
         if (songLabel != null) { m.songName.setText(songLabel); m.songFacts.setText("As it came in: -18.2 LUFS, 6.4 LU range, -3.1 dBTP true peak"); m.master.setEnabled(true); }
-        if (demo != null) { m.results.show(demo); m.progress.setValue(100); m.status.setText("Done in 1.4 minutes. Takes are in " + demo.dir); m.folder.setEnabled(true); m.sheet.setEnabled(true); }
+        if (demo != null) {
+            m.results.show(demo); m.showRows(rowsFor(demo)); m.progress.setValue(100); m.status.setText("Done in 1.4 minutes. Takes are in " + demo.dir); m.folder.setEnabled(true); m.sheet.setEnabled(true);
+            float[] p = new float[1600];
+            Random r = new Random(3);
+            for (int i = 0; i < p.length; i++) { double env = i < 80 ? i / 80.0 : i > 1520 ? (1600 - i) / 80.0 : (i / 260) % 2 == 0 ? 0.55 : 0.85; p[i] = (float) (env * (0.75 + 0.25 * r.nextDouble())); }
+            m.wave.peaks = p; m.wave.demoAt = 0.32; m.wave.demoLength = 214;
+            m.listening = true; m.play.setEnabled(true); m.blindTest.setEnabled(true); m.match.setEnabled(true); m.play.setText("Pause");
+            m.playing = 2;
+            if (blindOn) {
+                m.playing = m.blind.start(1, true);
+                m.match.setEnabled(false); m.blindTest.setText("Pick this one");
+                m.status.setText("Blind test: names hidden, order shuffled, levels matched. Listen with 1 to 4, then Pick this one.");
+            }
+        }
         if (busy) { m.song = new File("x.wav"); m.commercial.setSelected(true); m.cleanUp.setSelected(true); m.mp3.setSelected(false); m.setBusy(true); m.progress.setValue(78); m.status.setText("Punch: checking for distortion"); }
         m.root.setSize(w, h);
         layout(m.root);
@@ -411,8 +683,11 @@ final class MainWindow {
         JFrame f = new JFrame("Master Room");
         f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         f.setContentPane(root);
-        f.setMinimumSize(new Dimension(1040, 700));
-        f.setSize(1180, 760);
+        f.setMinimumSize(new Dimension(1040, 750));
+        f.setSize(1180, 780);
+        f.addWindowListener(new WindowAdapter() { @Override public void windowClosing(WindowEvent e) { player.close(); } });
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> key(e, f));
+        new Timer(40, e -> { if (listening) { wave.repaint(); if (play.getText().equals("Pause") != player.isPlaying()) refreshTransport(); } }).start();
         f.setLocationRelativeTo(null);
         f.setVisible(true);
     }

@@ -18,7 +18,8 @@ public final class Main {
             File png = new File(args[shot + 1]);
             MasterJob.Outcome demo = Arrays.asList(args).contains("--demo") ? Demo.outcome() : null;
             boolean busy = Arrays.asList(args).contains("--busy");
-            MainWindow.screenshot(png, 1180, 760, demo, demo != null || busy ? "Dusty Road (final mix).wav" : null, busy);
+            boolean blind = Arrays.asList(args).contains("--blind");
+            MainWindow.screenshot(png, 1180, 740, demo, demo != null || busy ? "Dusty Road (final mix).wav" : null, busy, blind);
             System.out.println("SCREENSHOT " + png.getAbsolutePath());
             return;
         }

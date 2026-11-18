@@ -43,6 +43,8 @@ public final class MasterJob {
     public static final class Outcome {
         public File dir, source;
         public Listen before;
+        /** The song as it came in (from {@link #before}): integrated loudness and true peak, for the Original row and level matching. */
+        public double beforeLufs, beforePeak;
         public final List<Take> takes = new ArrayList<>();
         public String sheet;
         /** The settings this round used, in words, e.g. "Classic Rock · -14 LUFS · commercial reference · clean-up on · MP3 320". */
@@ -122,6 +124,8 @@ public final class MasterJob {
         Target target = Target.builtIn(s.style, s.commercial);
         Engineer.Session session = Engineer.prepare(holder, target, s.lufs, options, bar);
         out.before = session.before;
+        out.beforeLufs = session.before.loudness.integrated;
+        out.beforePeak = session.before.truePeakDb;
         List<Engineer.Result> results = new ArrayList<>();
         for (Engineer.Recipe recipe : recipes) {
             takeIndex[0]++;
