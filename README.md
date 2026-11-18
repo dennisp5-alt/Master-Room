@@ -50,7 +50,7 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   FFmpeg), pick style and loudness, master Clean, Warm and Punch, and see loudness, true peak, the check and the
   streaming check (MP3 320, MP3 128 and AAC 256, as on the phone). Takes, MP3s and the session sheet go to
   `Documents\Master Room\<song>\<date time>\`. Command line: `"Master Room.exe"` is the window;
-  `java -jar masterroom.jar --master song.wav [--style ROCK] [--level -14] [--out folder]` runs headless.
+  `"Master Room CLI.exe" --master song.wav [--style ROCK] [--level -14] [--out folder]` runs headless.
 - **Same sound as the phone:** `desktop/check/DesktopCheck.java` masters a test song through the app and through
   the engine directly and requires byte-identical 24-bit and 16-bit files, plus loudness, ceilings, MP3, FLAC and AAC.
 - **CI:** `.github/workflows/build-windows.yml` compiles and checks on Windows, packages a portable app with Java

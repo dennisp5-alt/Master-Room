@@ -85,18 +85,19 @@ jobs:
           jpackage --type app-image --name "Master Room" --dest build/desktop/dist \
             --input build/desktop/app --main-jar masterroom.jar --main-class com.dennis.masterroom.desktop.Main \
             --app-version "$APP_VERSION" --vendor "Dennis" --description "Master Room mastering for Windows" \
-            --java-options "-Xmx6g" --java-options "-Dfile.encoding=UTF-8"
+            --java-options "-Xmx6g" --java-options "-Dfile.encoding=UTF-8" \
+            --add-launcher "Master Room CLI"=desktop/cli-launcher.properties
           ls "build/desktop/dist/Master Room"
           test -f "build/desktop/dist/Master Room/app/ffmpeg/ffmpeg.exe"
           cd build/desktop/dist && 7z a -tzip "../../../MasterRoom-Windows-$APP_VERSION.zip" "Master Room" > /dev/null
           cd - > /dev/null; ls -la MasterRoom-Windows-*.zip
 
-      - name: Packaged app masters a song (command line through the bundled Java)
+      - name: Packaged app masters a song (its console launcher and bundled Java runtime)
         run: |
-          "build/desktop/dist/Master Room/runtime/bin/java.exe" -cp "build/desktop/dist/Master Room/app/masterroom.jar" \
-            com.dennis.masterroom.desktop.Main --master check-song.wav --out packaged-test --level -14 | tee packaged.txt
-          grep -q "FFmpeg\|AAC 256" packaged.txt
-          grep -c "^TAKE" packaged.txt | grep -q 3
+          test -f "build/desktop/dist/Master Room/Master Room.exe"
+          "build/desktop/dist/Master Room/Master Room CLI.exe" --master check-song.wav --out packaged-test --level -14 | tee packaged.txt
+          grep -q "AAC 256" packaged.txt
+          test "$(grep -c '^TAKE' packaged.txt)" = 3
 
       - name: Installer (MSI, per-user, if WiX is available on the runner)
         continue-on-error: true
@@ -104,7 +105,8 @@ jobs:
           jpackage --type msi --name "Master Room" --dest build/desktop/msi \
             --input build/desktop/app --main-jar masterroom.jar --main-class com.dennis.masterroom.desktop.Main \
             --app-version "$APP_VERSION" --vendor "Dennis" --description "Master Room mastering for Windows" \
-            --java-options "-Xmx6g" --win-per-user-install --win-menu --win-shortcut --win-dir-chooser
+            --java-options "-Xmx6g" --add-launcher "Master Room CLI"=desktop/cli-launcher.properties \
+            --win-per-user-install --win-menu --win-shortcut --win-dir-chooser
           cp build/desktop/msi/*.msi "MasterRoom-Windows-$APP_VERSION.msi"
 
       - uses: actions/upload-artifact@v4
