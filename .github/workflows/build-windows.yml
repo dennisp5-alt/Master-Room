@@ -17,8 +17,9 @@ permissions:
 
 env:
   APP_VERSION: '0.1.0'
-  # FFmpeg LGPL build (BtbN), release branch 7.1. Only ffmpeg.exe and its licence are shipped.
-  FFMPEG_ZIP: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-lgpl-7.1.zip'
+  # FFmpeg LGPL builds by BtbN: the newest stable release branch (n<version>-latest-win64-lgpl), looked up at build time.
+  # Only ffmpeg.exe and its licence are shipped.
+  FFMPEG_REPO: 'BtbN/FFmpeg-Builds'
   FONTS: 'https://raw.githubusercontent.com/google/fonts/023eedd8780dd254e5905901473ed55e5475ee73/ofl'
 
 jobs:
@@ -54,8 +55,13 @@ jobs:
           curl -fsSL -o $F/OFL-JetBrainsMono.txt $FONTS/jetbrainsmono/OFL.txt
 
       - name: FFmpeg (LGPL)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL -o ffmpeg.zip "$FFMPEG_ZIP"
+          NAME=$(gh release view latest -R "$FFMPEG_REPO" --json assets --jq '.assets[].name' | grep -E '^ffmpeg-n[0-9.]+-latest-win64-lgpl-[0-9.]+\.zip$' | sort -V | tail -1)
+          test -n "$NAME" || { echo "No stable LGPL win64 FFmpeg build found"; gh release view latest -R "$FFMPEG_REPO" --json assets --jq '.assets[].name' | grep win64; exit 1; }
+          echo "FFmpeg build: $NAME" | tee ffmpeg-build.txt
+          gh release download latest -R "$FFMPEG_REPO" -p "$NAME" -O ffmpeg.zip
           mkdir -p ffx build/desktop/app/ffmpeg
           7z x -y -offx ffmpeg.zip > /dev/null
           cp ffx/*/bin/ffmpeg.exe build/desktop/app/ffmpeg/
@@ -114,5 +120,6 @@ jobs:
           name: MasterRoom-Windows-checks
           path: |
             desktop-check.txt
+            ffmpeg-build.txt
             packaged.txt
             window-*.png
