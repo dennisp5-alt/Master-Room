@@ -15,7 +15,7 @@ import java.util.List;
  * every version is turned to the masters' level (the quietest master), because the louder of two
  * versions nearly always sounds better for that reason alone. Playback gain only: files are never touched.
  */
-final class AbMixer {
+final class AbMixer implements Feed {
     static final int BLOCK = 2048;
 
     static final class Version {
@@ -81,16 +81,16 @@ final class AbMixer {
     synchronized double trimDb(int i) { return 20 * Math.log10(Math.max(1e-6, versions.get(i).gain)); }
     synchronized int size() { return versions.size(); }
     synchronized Version get(int i) { return versions.get(i); }
-    synchronized int rate() { return versions.isEmpty() ? 48000 : versions.get(0).header.rate; }
-    synchronized long frames() { return versions.isEmpty() ? 0 : versions.get(0).header.frames; }
+    @Override public synchronized int rate() { return versions.isEmpty() ? 48000 : versions.get(0).header.rate; }
+    @Override public synchronized long frames() { return versions.isEmpty() ? 0 : versions.get(0).header.frames; }
     void select(int i) { active = i; }
     int active() { return active; }
-    long position() { return position; }
-    double seconds() { return position / (double) rate(); }
-    double length() { return frames() / (double) rate(); }
-    synchronized double fraction() { return versions.isEmpty() ? 0 : (double) position / Math.max(1, frames()); }
-    synchronized void rewind(long frames) { position = Math.max(0, position - frames); }
-    synchronized void seek(double fraction) { if (!versions.isEmpty()) position = (long) (Math.max(0, Math.min(1, fraction)) * frames()); }
+    @Override public long position() { return position; }
+    @Override public double seconds() { return position / (double) rate(); }
+    @Override public double length() { return frames() / (double) rate(); }
+    @Override public synchronized double fraction() { return versions.isEmpty() ? 0 : (double) position / Math.max(1, frames()); }
+    @Override public synchronized void rewind(long frames) { position = Math.max(0, position - frames); }
+    @Override public synchronized void seek(double fraction) { if (!versions.isEmpty()) position = (long) (Math.max(0, Math.min(1, fraction)) * frames()); }
 
     synchronized void clear() {
         for (Version v : versions) { try { v.raf.close(); } catch (IOException ignored) { } }
@@ -116,7 +116,7 @@ final class AbMixer {
      * The next block, interleaved stereo, into out (2 * BLOCK). Crossfades when the selection changed.
      * Returns false at the end of the song (and goes back to the start).
      */
-    synchronized boolean next(float[] out) throws IOException {
+    @Override public synchronized boolean next(float[] out) throws IOException {
         if (versions.isEmpty()) { Arrays.fill(out, 0); return false; }
         int want = Math.min(active, versions.size() - 1);
         Version now = versions.get(want), was = versions.get(heard < 0 ? want : Math.min(heard, versions.size() - 1));

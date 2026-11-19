@@ -70,4 +70,11 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   waveform follows the selected version. Everything is measured from the audio being heard, lined up with the sound
   card's position; numbers stay hidden in the blind test. Blind picks are also kept in the phone's taste format
   (`taste.txt`) for a Yours take later.
-- Next builds: stems, references and settings, polish.
+- **Build 4, stems:** **Open stems** (or drop the WAVs, or Stem Studio's ZIP); each file is placed by the stem word in
+  its name. The STEM BALANCE view shows the phone's auto balance in words, with solo (listening only), mute (also in
+  the master) and 0.5 dB nudges per stem; Back to auto returns to the app's balance. Play hears the balance live
+  through the console. Master renders exactly as the phone does: the stems summed as they came are the source, then
+  vocals and other instruments are treated on their own, the stems balanced (with the vocal rides) and mastered.
+  `StemCheck` requires the takes to be byte-identical to the phone's engine sequence. CLI:
+  `"Master Room CLI.exe" --master --stems <WAVs or ZIP>`.
+- Next builds: references and settings, polish and an icon.

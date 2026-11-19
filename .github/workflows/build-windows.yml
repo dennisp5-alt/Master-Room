@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  APP_VERSION: '0.3.0'
+  APP_VERSION: '0.4.0'
   # FFmpeg LGPL builds by BtbN: the newest stable release branch (n<version>-latest-win64-lgpl), looked up at build time.
   # Only ffmpeg.exe and its licence are shipped.
   FFMPEG_REPO: 'BtbN/FFmpeg-Builds'
@@ -68,9 +68,9 @@ jobs:
           cp ffx/*/LICENSE.txt build/desktop/app/ffmpeg/LICENSE-FFmpeg-LGPL.txt
           build/desktop/app/ffmpeg/ffmpeg.exe -hide_banner -version | head -1
 
-      - name: Checks on Windows (parity with the engine, loudness, ceilings, MP3, FLAC, AAC, A/B player, console)
+      - name: Checks on Windows (parity with the engine, loudness, ceilings, MP3, FLAC, AAC, A/B player, console, stems)
         run: |
-          java -Xmx3g -Dmasterroom.ffmpeg=build/desktop/app/ffmpeg/ffmpeg.exe -cp "build/desktop/classes;build/desktop/check" DesktopCheck 40 "check-song.wav" | tee desktop-check.txt
+          java -Xmx3g -Dmasterroom.ffmpeg=build/desktop/app/ffmpeg/ffmpeg.exe -cp "build/desktop/classes;build/desktop/check" DesktopCheck 40 "check-song.wav" "check-stems.zip" | tee desktop-check.txt
           grep -q DESKTOP_CHECK_PASS desktop-check.txt
 
       - name: Screenshots of the window (Windows fonts and rendering)
@@ -80,6 +80,7 @@ jobs:
           java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-locked.png --busy
           java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-blind.png --demo --blind
           java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-tone.png --demo --tone
+          java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-stems.png --stems
 
       - name: Package (portable app with Java and FFmpeg included)
         run: |
@@ -101,6 +102,10 @@ jobs:
           "build/desktop/dist/Master Room/Master Room CLI.exe" --master check-song.wav --out packaged-test --level -14 | tee packaged.txt
           grep -q "AAC 256" packaged.txt
           test "$(grep -c '^TAKE' packaged.txt)" = 3
+          "build/desktop/dist/Master Room/Master Room CLI.exe" --master --stems check-stems.zip --out packaged-test --level -14 --no-mp3 | tee packaged-stems.txt
+          grep -q "^STEMS 4 Check Song" packaged-stems.txt
+          test "$(grep -c '^TAKE' packaged-stems.txt)" = 3
+          grep -q "^STEM Auto balance" packaged-stems.txt
 
       - name: Installer (MSI, per-user, if WiX is available on the runner)
         continue-on-error: true
@@ -127,4 +132,5 @@ jobs:
             desktop-check.txt
             ffmpeg-build.txt
             packaged.txt
+            packaged-stems.txt
             window-*.png
