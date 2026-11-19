@@ -10,6 +10,35 @@ public final class EngineChecks {
         System.out.printf(Locale.US, "%s %-46s %s%n", ok ? "PASS" : "FAIL", name, detail);
         if (!ok) failed++;
     }
+    /** 24-bit: what is already 24-bit is written back exactly; new audio is still dithered. */
+    static void wav24() throws java.io.IOException {
+        java.io.File dir = java.nio.file.Files.createTempDirectory("wav24").toFile();
+        java.io.File first = new java.io.File(dir, "first.wav"), again = new java.io.File(dir, "again.wav"), quiet = new java.io.File(dir, "quiet.wav"), low = new java.io.File(dir, "low.wav");
+        Audio song = music(6, 48000);
+        Wav.write(first, song, 24);
+        Audio back = Wav.read(first);
+        Wav.write(again, back, 24);
+        boolean same = java.util.Arrays.equals(java.nio.file.Files.readAllBytes(first.toPath()), java.nio.file.Files.readAllBytes(again.toPath()));
+        check("24-bit WAV written again is unchanged", same, "byte for byte");
+        Wav.write(quiet, new Audio(48000, 48000), 24);
+        Audio silent = Wav.read(quiet);
+        boolean zero = true;
+        for (int i = 0; i < silent.frames(); i++) zero &= silent.l[i] == 0 && silent.r[i] == 0;
+        check("Digital silence stays silent at 24-bit", zero, "no dither noise added");
+        Audio fine = new Audio(48000, 48000);
+        java.util.Arrays.fill(fine.l, 0.3f / 8388608f);
+        java.util.Arrays.fill(fine.r, 0.3f / 8388608f);
+        Wav.write(low, fine, 24);
+        Audio d = Wav.read(low);
+        double mean = 0;
+        int ones = 0;
+        for (int i = 0; i < d.frames(); i++) { mean += d.l[i] * 8388608.0; if (d.l[i] != 0) ones++; }
+        mean /= d.frames();
+        check("New audio between steps is still dithered", ones > 0 && Math.abs(mean - 0.3) < 0.02, String.format(Locale.US, "mean %.3f steps for 0.3", mean));
+        for (java.io.File f : new java.io.File[]{first, again, quiet, low}) f.delete();
+        dir.delete();
+    }
+
     static Audio sine(double hz, double db, double seconds, int rate, double phase) {
         int n = (int) (seconds * rate);
         Audio a = new Audio(n, rate);
@@ -270,6 +299,7 @@ public final class EngineChecks {
         check("Yours take leans to what you pick", mine != null && Math.abs(mine.valve - 0.49) < 0.02, mine == null ? "none" : String.format(Locale.US, "valve %.2f", mine.valve));
 
         try { stems(); autoBalance(); } catch (Exception problem) { check("Stems", false, String.valueOf(problem)); }
+        try { wav24(); } catch (Exception problem) { check("24-bit WAV", false, String.valueOf(problem)); }
         System.out.println(failed == 0 ? "ALL_ENGINE_CHECKS_PASS" : failed + " CHECK(S) FAILED");
         if (failed != 0) System.exit(1);
     }

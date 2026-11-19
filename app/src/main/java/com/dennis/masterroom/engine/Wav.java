@@ -127,7 +127,11 @@ public final class Wav {
         return (float) (((b[p] & 255) | (b[p + 1] & 255) << 8 | (b[p + 2] & 255) << 16 | b[p + 3] << 24) / 2147483648.0);
     }
 
-    /** Writes PCM with triangular dither; 16-bit also gets gentle noise shaping. */
+    /**
+     * Writes PCM with triangular dither; 16-bit also gets gentle noise shaping. At 24-bit a sample already on
+     * the 24-bit grid (a 24-bit source written again, digital silence) needs no rounding, so it gets no dither
+     * and is written exactly as it is; everything else is dithered as before.
+     */
     public static void write(File f, Audio a, int bits) throws IOException {
         if (bits != 16 && bits != 24) throw new IOException("bits");
         int frames = a.frames(), bytes = bits / 8;
@@ -148,7 +152,7 @@ public final class Wav {
                     double x = (c == 0 ? a.l[i] : a.r[i]) * scale;
                     double wanted = shape ? x - 1.2 * e1[c] + 0.5 * e2[c] : x;
                     double tpdf = rnd.nextDouble() - rnd.nextDouble();
-                    double q = Math.rint(wanted + tpdf);
+                    double q = !shape && wanted == Math.rint(wanted) ? wanted : Math.rint(wanted + tpdf);
                     if (q > max) q = max; else if (q < -scale) q = -scale;
                     e2[c] = e1[c]; e1[c] = q - wanted;
                     int v = (int) q;
