@@ -47,6 +47,12 @@ public final class MasterJob {
         public boolean[] stemSilent = new boolean[Stems.COUNT];
         /** How the set was made (full mix left out, files combined, silent stand-ins), for the session sheet. */
         public List<String> stemPrep = new ArrayList<>();
+        /** The tone target (reference records or an album); null for the built-in curve of the style. */
+        public Target target;
+        /** An extra take built from Dennis's choices (Taste.yours), or null. */
+        public Engineer.Recipe yours;
+        /** Add the phone's album check (each take against the album so far) to the session sheet. */
+        public boolean albumCheck;
         /** Every file of the set, and a level and mute for each when adjusting by hand (Suno's stems one by one). */
         public List<StemFiles.Track> stemTracks;
         public double[] trackDb;
@@ -57,9 +63,9 @@ public final class MasterJob {
 
     public static final class Take {
         public String label, about, verdict, streaming, report;
-        public double lufs, truePeak, ceiling, lra;
-        /** Measured tone (31 third-octave bands, mid), for the console. */
-        public double[] mid;
+        public double lufs, truePeak, ceiling, lra, punch;
+        /** Measured tone (31 third-octave bands, mid and side), for the console, the album and the records gap. */
+        public double[] mid, side;
         public File[] files;
     }
 
@@ -67,7 +73,11 @@ public final class MasterJob {
         public File dir, source;
         public Listen before;
         /** The song as it came in (from {@link #before}): integrated loudness and true peak, for the Original row and level matching. */
-        public double beforeLufs, beforePeak, beforeLra;
+        public double beforeLufs, beforePeak, beforeLra, beforePunch;
+        public double[] beforeSide;
+        /** What the tone was aimed at: its name, and (for records or an album) its punch, width and low end. */
+        public String targetName;
+        public double targetPunch = Double.NaN, targetWidth = Double.NaN, targetLow = Double.NaN;
         /** The song's tone as it came in, and the target tone the round aimed at (31 bands, mid). */
         public double[] beforeMid, targetMid;
         /** The loudness asked for, and the style. */
@@ -204,7 +214,8 @@ public final class MasterJob {
     public static String describe(Settings s) {
         return s.style.label + " · " + String.format(Locale.US, "%.0f LUFS", s.lufs) + " · " + (s.commercial ? "commercial reference" : "built-in tone reference")
             + " · clean-up " + (s.cleanUp ? "on" : "off") + (s.mp3 ? " · MP3 320" : "")
-            + (s.stems == null ? "" : " · from " + s.stemCount() + " stems, " + (s.stemAuto ? "auto balance" : "own balance"));
+            + (s.stems == null ? "" : " · from " + s.stemCount() + " stems, " + (s.stemAuto ? "auto balance" : "own balance"))
+            + (s.target != null ? " · tone from " + s.target.name : "");
     }
 
     /** Asks a running round to stop at its next checkpoint. */
@@ -231,6 +242,7 @@ public final class MasterJob {
         options.fromStems = s.stems != null;
         List<Engineer.Recipe> recipes = new ArrayList<>();
         for (Engineer.Take take : Engineer.Take.values()) recipes.add(take.recipe());
+        if (s.yours != null) recipes.add(s.yours);
         final int[] takeIndex = {-1};
         final int takeCount = recipes.size();
         // The phone's progress formula: preparing is the first 15%, then the takes share the rest.
@@ -268,7 +280,7 @@ public final class MasterJob {
         }
         Audio[] holder = {in};
         in = null;
-        Target target = Target.builtIn(s.style, s.commercial);
+        Target target = s.target != null ? s.target : Target.builtIn(s.style, s.commercial);
         Engineer.Session session = Engineer.prepare(holder, target, s.lufs, options, bar);
         // The phone keeps the song as it came as the source; the balanced mix is what gets mastered.
         out.before = asItCame != null ? asItCame : session.before;
@@ -276,7 +288,11 @@ public final class MasterJob {
         out.beforePeak = out.before.truePeakDb;
         out.beforeLra = out.before.loudness.lra;
         out.beforeMid = out.before.midDb;
+        out.beforeSide = out.before.sideDb;
+        out.beforePunch = out.before.punchDb;
         out.targetMid = target.midDb;
+        out.targetName = target.name;
+        out.targetPunch = target.punchDb; out.targetWidth = target.widthDb; out.targetLow = target.lowEndDb;
         out.targetLufs = s.lufs;
         out.style = s.style;
         List<Engineer.Result> results = new ArrayList<>();
@@ -301,6 +317,8 @@ public final class MasterJob {
             t.truePeak = r.after.truePeakDb;
             t.lra = r.after.loudness.lra;
             t.mid = r.after.midDb;
+            t.side = r.after.sideDb;
+            t.punch = r.after.punchDb;
             t.ceiling = r.ceilingDb;
             t.verdict = r.verdict;
             t.report = r.distortion == null ? "" : String.valueOf(r.distortion);
@@ -310,7 +328,8 @@ public final class MasterJob {
         }
         session.release();
         out.seconds = (System.nanoTime() - t0) / 1e9;
-        out.sheet = "Mastered with: " + out.settings + System.lineSeparator() + System.lineSeparator() + Engineer.sheet(session, results) + String.format(Locale.US, "%nFinished in %.1f minutes on this computer", out.seconds / 60);
+        out.sheet = "Mastered with: " + out.settings + System.lineSeparator() + System.lineSeparator() + Engineer.sheet(session, results)
+            + (s.albumCheck ? Library.albumCheck(out.takes) : "") + String.format(Locale.US, "%nFinished in %.1f minutes on this computer", out.seconds / 60);
         java.nio.file.Files.writeString(new File(dir, "session sheet.txt").toPath(), out.sheet);
         listener.progress("Done. Your takes are ready.", 100);
         return out;

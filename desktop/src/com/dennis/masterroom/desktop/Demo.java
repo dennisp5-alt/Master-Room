@@ -15,26 +15,34 @@ final class Demo {
         String[][] rows = {
             {"Clean", "Transparent path: no colour, light compression", "-14.0", "-2.2", "Fixed 29 spots, passed", "Safe after encoding: MP3 320 -2.0 dBTP, MP3 128 -2.0 dBTP, AAC 256 -2.0 dBTP"},
             {"Warm", "Transformer, tape and valve path, medium compression", "-14.0", "-2.0", "Fixed 28 spots, passed", "Safe after encoding: MP3 320 -2.1 dBTP, MP3 128 -1.9 dBTP, AAC 256 -1.0 dBTP"},
-            {"Punch", "Slower attack lets drums through, more of the peaks go to the clipper", "-14.0", "-2.0", "Fixed 32 spots, passed", "Safe after encoding: MP3 320 -2.0 dBTP, MP3 128 -1.7 dBTP, AAC 256 -1.9 dBTP"}};
+            {"Punch", "Slower attack lets drums through, more of the peaks go to the clipper", "-14.0", "-2.0", "Fixed 32 spots, passed", "Safe after encoding: MP3 320 -2.0 dBTP, MP3 128 -1.7 dBTP, AAC 256 -1.9 dBTP"},
+            {"Yours", "Blend of your picks: Clean 2.0, Warm 5.5, Punch 1.5", "-14.0", "-2.0", "Fixed 30 spots, passed", "Safe after encoding: MP3 320 -2.0 dBTP, MP3 128 -1.8 dBTP, AAC 256 -1.9 dBTP"}};
         double[] target = Target.builtIn(Target.Style.CLASSIC_ROCK, true).midDb;
         // Sample tone shapes relative to the target (dB per band): a darker, boomier source and three takes near the target.
         o.targetMid = target;
         o.beforeMid = shape(target, -0.55, 2.4, 0.4);
-        double[][] takes = {shape(target, -0.10, 0.6, 0.15), shape(target, -0.22, 1.2, 0.2), shape(target, -0.05, 1.6, 0.35)};
-        double[] lra = {5.2, 4.7, 4.9};
+        double[][] takes = {shape(target, -0.10, 0.6, 0.15), shape(target, -0.22, 1.2, 0.2), shape(target, -0.05, 1.6, 0.35), shape(target, -0.16, 1.1, 0.22)};
+        double[] lra = {5.2, 4.7, 4.9, 4.8}, punch = {9.1, 8.4, 10.2, 8.9};
+        // Sample side (width) shapes, and a round aimed at reference records, so the records gap shows.
+        o.beforeSide = shape(target, -0.4, -6, 0.3);
+        o.beforePunch = 11.0;
+        o.targetName = "4 reference records";
+        o.targetPunch = 9.0; o.targetWidth = -7.5; o.targetLow = 1.2;
         int k = 0;
         for (String[] r : rows) {
             MasterJob.Take t = new MasterJob.Take();
-            t.mid = takes[k]; t.lra = lra[k++];
+            t.mid = takes[k]; t.side = shape(target, -0.3, -5.5 + k * 0.3, 0.25); t.punch = punch[k]; t.lra = lra[k++];
             t.label = r[0]; t.about = r[1]; t.lufs = Double.parseDouble(r[2]); t.truePeak = Double.parseDouble(r[3]); t.ceiling = -2.0;
             t.verdict = r[4]; t.streaming = r[5]; t.files = new File[0];
             o.takes.add(t);
         }
+        Listen near = Listen.fromBands(o.takes.get(0).mid, o.takes.get(0).side);
+        o.targetLow = near.lowEndDb() + 0.6; o.targetWidth = near.widthDb() - 0.4;
         o.beforeLufs = -18.2; o.beforePeak = -3.1; o.beforeLra = 6.4;
         o.targetLufs = -14; o.style = Target.Style.CLASSIC_ROCK;
         o.seconds = 84;
         o.sheet = "Sample";
-        o.settings = "Classic Rock · -14 LUFS · commercial reference · clean-up on · MP3 320";
+        o.settings = "Classic Rock · -14 LUFS · commercial reference · clean-up on · MP3 320 · tone from 4 reference records";
         return o;
     }
 

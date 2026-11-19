@@ -1,7 +1,9 @@
 package com.dennis.masterroom.desktop;
 
 import com.dennis.masterroom.engine.Audio;
+import com.dennis.masterroom.engine.Engineer;
 import com.dennis.masterroom.engine.Listen;
+import com.dennis.masterroom.engine.Release;
 import com.dennis.masterroom.engine.Spectrum;
 import com.dennis.masterroom.engine.Stems;
 import com.dennis.masterroom.engine.Target;
@@ -74,6 +76,10 @@ final class MainWindow {
     private final JLabel viewNote = text(" ", Look.size(Look.body, 12), Look.DIM);
     private final Tile readLufs = new Tile("INTEGRATED", "LUFS"), readPeak = new Tile("TRUE PEAK", "dBTP"), readRange = new Tile("RANGE", "LU");
     private final AbPlayer.Moment heard = new AbPlayer.Moment();
+    // References, album and saving (build 5)
+    private final JLabel toneFrom = text(" ", Look.size(Look.strong, 14), Look.TEXT);
+    private final JButton refsBtn = button("Records…", false), saveTake = button("Save take", false);
+    private final JLabel gapLine = text(" ", Look.size(Look.body, 12), Look.MID);
     private boolean heardOn, showingTone;
     /** Waveform overview per version, in the player's order. */
     private float[][] peaksByVersion;
@@ -124,7 +130,7 @@ final class MainWindow {
         middle.add(gap(8));
         bench.setOpaque(false); bench.setAlignmentX(0);
         bench.add(results, "takes"); bench.add(stemsView, "stems");
-        int benchHeight = TOP + 4 * ROW + 40;
+        int benchHeight = TOP + 5 * ROW5 + 40;
         bench.setPreferredSize(new Dimension(800, benchHeight)); bench.setMaximumSize(new Dimension(Integer.MAX_VALUE, benchHeight));
         middle.add(bench);
         middle.add(gap(10));
@@ -163,7 +169,9 @@ final class MainWindow {
         openStems.setToolTipText("Vocals, drums, bass and other (guitar and piano too), as WAVs or Stem Studio's ZIP");
         stemsTab.addActionListener(e -> showBench(true));
         takesTab.addActionListener(e -> showBench(false));
-        style.addActionListener(e -> { if (stems != null) { applyAuto(); refreshConsole(); } });
+        style.addActionListener(e -> { refreshTone(); if (stems != null) { applyAuto(); refreshConsole(); } });
+        refsBtn.addActionListener(e -> showReferences());
+        saveTake.addActionListener(e -> showSaveTake());
         commercial.addActionListener(e -> refreshConsole());
         master.addActionListener(e -> masterNow());
         stop.addActionListener(e -> { MasterJob.stop(); status.setText("Stopping at the next safe point…"); });
@@ -187,6 +195,10 @@ final class MainWindow {
         level.addActionListener(e -> refreshConsole());
         setListening(false);
         showTone(PREFS.getBoolean("toneView", false));
+        Library.adopt(new File(outRoot, "taste.txt"));
+        Dimension tf = new Dimension(146, toneFrom.getPreferredSize().height);
+        toneFrom.setPreferredSize(tf); toneFrom.setMaximumSize(tf); toneFrom.setMinimumSize(tf);
+        refreshTone();
         engineLine.setText(Ffmpeg.available() ? "FFmpeg ready: FLAC, M4A, AAC and the AAC streaming check" : "FFmpeg not found: WAV and MP3 only");
         root.setTransferHandler(new TransferHandler() {
             @Override public boolean canImport(TransferSupport s) { return !busy && s.isDataFlavorSupported(DataFlavor.javaFileListFlavor); }
@@ -205,7 +217,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 4.3 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 5 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -255,7 +267,10 @@ final class MainWindow {
         blindTest.setToolTipText("Hides the names, shuffles the order and matches levels. Pick the one you like, then see which it was.");
         r.add(play); r.add(Box.createHorizontalStrut(12)); r.add(wave); r.add(Box.createHorizontalStrut(14));
         r.add(match); r.add(Box.createHorizontalStrut(12)); r.add(blindTest);
-        for (AbstractButton b : new AbstractButton[]{play, blindTest, match, open, master, stop, folder, sheet, saveTo, commercial, cleanUp, mp3}) b.setFocusable(false);
+        saveTake.setPreferredSize(new Dimension(120, 40)); saveTake.setMaximumSize(saveTake.getPreferredSize());
+        saveTake.setToolTipText("Save the selected take as release files, with the song's details written in");
+        r.add(Box.createHorizontalStrut(10)); r.add(saveTake);
+        for (AbstractButton b : new AbstractButton[]{play, blindTest, match, open, master, stop, folder, sheet, saveTo, commercial, cleanUp, mp3, refsBtn, saveTake}) b.setFocusable(false);
         return r;
     }
 
@@ -285,7 +300,19 @@ final class MainWindow {
         tiles.setOpaque(false); tiles.setAlignmentX(0);
         tiles.add(readLufs); tiles.add(readPeak); tiles.add(readRange);
         c.add(tiles);
-        c.add(gap(12));
+        c.add(gap(10));
+        JPanel tgt = row();
+        tgt.add(text("TONE FROM", Look.size(Look.label, 12), Look.AMBER_DIM));
+        tgt.add(Box.createHorizontalStrut(10));
+        tgt.add(toneFrom);
+        tgt.add(Box.createHorizontalGlue());
+        refsBtn.setPreferredSize(new Dimension(104, 30)); refsBtn.setMaximumSize(refsBtn.getPreferredSize());
+        refsBtn.setToolTipText("Reference records you want to sound like, and album match");
+        tgt.add(refsBtn);
+        c.add(tgt);
+        c.add(gap(4));
+        c.add(gapLine);
+        c.add(gap(8));
         JPanel tabs = new JPanel(new GridLayout(1, 2, 6, 0)) { @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); } };
         tabs.setOpaque(false); tabs.setAlignmentX(0);
         tabs.add(lightsTab); tabs.add(toneTab);
@@ -336,7 +363,242 @@ final class MainWindow {
         tone.show(src, take, cur == null ? "" : cur.name, hide);
         if (peaksByVersion != null && any) wave.peaks = peaksByVersion[hide ? 0 : Math.min(playing, peaksByVersion.length - 1)];
         consoleMode.setText(!any ? " " : player.isPlaying() || meter.playing() ? "PLAYING  ·  AS HEARD" : hide ? "BLIND TEST" : "SELECTED  ·  " + cur.name.toUpperCase(Locale.ROOT));
+        gapLine.setText(gapText(cur, hide));
+        saveTake.setEnabled(any && !hide && !cur.original && last != null && !busy && !onStems);
         meter.repaint(); lights.repaint(); readLufs.repaint(); readPeak.repaint(); readRange.repaint(); wave.repaint();
+    }
+
+    /**
+     * The phone's gap panel: the selected take against the records it was aimed at (punch, low end, width),
+     * and which take comes closest. Only when the round aimed at records or an album.
+     */
+    private String gapText(Row cur, boolean hide) {
+        if (cur == null || hide || cur.original || round == null || Double.isNaN(round.targetWidth) || cur.side == null) return " ";
+        Row closest = null;
+        double best = Double.MAX_VALUE;
+        for (Row x : rows) {
+            if (x.original || x.side == null) continue;
+            Listen l = Listen.fromBands(x.mid, x.side);
+            double miss = Math.abs(l.lowEndDb() - round.targetLow) + Math.abs(l.widthDb() - round.targetWidth)
+                + (Double.isNaN(round.targetPunch) ? 0 : Math.abs(x.punch - round.targetPunch));
+            if (miss < best) { best = miss; closest = x; }
+        }
+        Listen l = Listen.fromBands(cur.mid, cur.side);
+        String punch = Double.isNaN(round.targetPunch) ? "" : String.format(Locale.US, "punch %+.1f, ", cur.punch - round.targetPunch);
+        return String.format(Locale.US, "<html>Vs records: %slow end %+.1f, width %+.1f dB.<br>Closest to the records: %s</html>",
+            punch, l.lowEndDb() - round.targetLow, l.widthDb() - round.targetWidth, closest == null ? "-" : closest.name);
+    }
+
+    /** What sets the tone, on the console; an album with saved songs also sets the loudness (as on the phone). */
+    private void refreshTone() {
+        Target.Style st = (Target.Style) style.getSelectedItem();
+        toneFrom.setText(Library.toneShort(st));
+        toneFrom.setToolTipText(Library.toneLine(st));
+        double albumLevel = Library.albumLevel();
+        if (!Double.isNaN(albumLevel)) {
+            for (int i = 0; i < LEVELS.length; i++) if (Math.abs(LEVELS[i] - albumLevel) < 0.01 && level.getSelectedIndex() != i) level.setSelectedIndex(i);
+        }
+    }
+
+    /** Reference records for the style, and album match: only measured numbers are kept, never audio. */
+    private void showReferences() {
+        JDialog d = new JDialog(SwingUtilities.getWindowAncestor(root), "Tone references", Dialog.ModalityType.APPLICATION_MODAL);
+        JPanel body = column();
+        body.setBorder(new EmptyBorder(18, 20, 16, 20));
+        JPanel shell = new JPanel(new BorderLayout()); shell.setBackground(Look.BG); shell.add(body, BorderLayout.CENTER);
+        d.setContentPane(shell);
+        Runnable[] fill = new Runnable[1];
+        JLabel working = text(" ", Look.size(Look.body, 13), Look.AMBER);
+        fill[0] = () -> {
+            body.removeAll();
+            Target.Style st = (Target.Style) style.getSelectedItem();
+            body.add(text("REFERENCE RECORDS  ·  " + st.label.toUpperCase(Locale.ROOT), Look.size(Look.label, 13), Look.AMBER_DIM));
+            body.add(gap(6));
+            body.add(text(Library.toneLine(st), Look.size(Look.body, 14), Look.MID));
+            body.add(gap(8));
+            List<String> recs = Library.shelfLines(st);
+            for (int i = 0; i < recs.size(); i++) {
+                final int index = i;
+                JPanel r = row();
+                r.add(text(recs.get(i).split("\\|")[0], Look.size(Look.body, 14), Look.TEXT));
+                r.add(Box.createHorizontalGlue());
+                JButton rm = button("Remove", false);
+                rm.setPreferredSize(new Dimension(96, 28)); rm.setMaximumSize(rm.getPreferredSize());
+                rm.addActionListener(e -> { try { Library.removeRecord(st, index); } catch (Exception x) { working.setText(rootMessage(x)); } fill[0].run(); refreshTone(); });
+                r.add(rm);
+                body.add(r);
+                body.add(gap(4));
+            }
+            JPanel add = row();
+            JButton addBtn = button("Add records…", false);
+            addBtn.setPreferredSize(new Dimension(150, 34)); addBtn.setMaximumSize(addBtn.getPreferredSize());
+            addBtn.addActionListener(e -> addRecords(d, st, working, fill[0]));
+            add.add(addBtn); add.add(Box.createHorizontalStrut(12)); add.add(working); add.add(Box.createHorizontalGlue());
+            body.add(gap(4));
+            body.add(add);
+            body.add(gap(18));
+            body.add(text("ALBUM MATCH", Look.size(Look.label, 13), Look.AMBER_DIM));
+            body.add(gap(6));
+            List<String> album = Library.albumLines();
+            if (album.isEmpty()) {
+                body.add(text("Match a release in tone and loudness: each take you save joins the album.", Look.size(Look.body, 14), Look.MID));
+                body.add(gap(8));
+                JPanel start = row();
+                JTextField name = field(PREFS.get("albumName", ""), 260);
+                JButton go = button("Start album", false);
+                go.setPreferredSize(new Dimension(140, 34)); go.setMaximumSize(go.getPreferredSize());
+                go.addActionListener(e -> {
+                    try { Library.startAlbum(name.getText()); PREFS.put("albumName", name.getText().trim()); } catch (Exception x) { working.setText(rootMessage(x)); }
+                    fill[0].run(); refreshTone();
+                });
+                start.add(text("Name", Look.size(Look.body, 14), Look.MID)); start.add(Box.createHorizontalStrut(10));
+                start.add(name); start.add(Box.createHorizontalStrut(10)); start.add(go); start.add(Box.createHorizontalGlue());
+                body.add(start);
+            } else {
+                int songs = album.size() - 1;
+                double lvl = Library.albumLevel();
+                body.add(text(songs == 0 ? album.get(0) + ": save a take to set its sound."
+                    : String.format(Locale.US, "%s: %d song%s, target %.0f LUFS. It sets the tone and loudness of the next songs.", album.get(0), songs, songs == 1 ? "" : "s", lvl),
+                    Look.size(Look.body, 14), Look.MID));
+                body.add(gap(6));
+                for (int i = 1; i < album.size(); i++) {
+                    String[] p = album.get(i).split("\\|");
+                    body.add(text(p[0] + "   " + p[1] + " LUFS", Look.size(Look.body, 13), Look.TEXT));
+                }
+                body.add(gap(8));
+                JButton end = button("End album", false);
+                end.setPreferredSize(new Dimension(130, 34)); end.setMaximumSize(end.getPreferredSize());
+                end.addActionListener(e -> {
+                    if (JOptionPane.showConfirmDialog(d, "End the album \"" + album.get(0) + "\"? Its saved takes stay where they are; the app stops matching them.",
+                        "End album", JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
+                    Library.endAlbum(); fill[0].run(); refreshTone();
+                });
+                body.add(end);
+            }
+            body.add(gap(18));
+            body.add(text("<html>Only the measured numbers are kept, never the audio. Album first, then records, then the style's built-in curve.</html>", Look.size(Look.body, 12), Look.DIM));
+            body.add(gap(12));
+            JButton close = button("Close", false);
+            close.setPreferredSize(new Dimension(110, 34)); close.setMaximumSize(close.getPreferredSize());
+            close.addActionListener(e -> d.dispose());
+            body.add(close);
+            body.revalidate(); body.repaint();
+            d.pack();
+            d.setSize(Math.max(620, d.getWidth()), d.getHeight());
+        };
+        fill[0].run();
+        d.setLocationRelativeTo(root);
+        d.setVisible(true);
+        refreshTone();
+    }
+
+    private void addRecords(Window owner, Target.Style st, JLabel working, Runnable refill) {
+        JFileChooser fc = new JFileChooser(PREFS.get("refDir", PREFS.get("lastDir", System.getProperty("user.home"))));
+        fc.setMultiSelectionEnabled(true);
+        fc.setDialogTitle("Records you want " + st.label + " to sound like");
+        if (fc.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return;
+        File[] picked = fc.getSelectedFiles();
+        if (picked.length == 0) return;
+        PREFS.put("refDir", picked[0].getParent() == null ? "" : picked[0].getParent());
+        new SwingWorker<String, String>() {
+            @Override protected String doInBackground() {
+                int done = 0;
+                List<String> failed = new ArrayList<>();
+                for (File f : picked) {
+                    publish("Measuring " + f.getName() + "…");
+                    try {
+                        Listen l = Listen.to(MasterJob.open(f));
+                        Library.addRecord(st, f.getName().replaceAll("\\.[^.]+$", ""), l);
+                        done++;
+                    } catch (Exception e) { failed.add(f.getName()); }
+                }
+                return "Added " + done + (failed.isEmpty() ? "" : ". Could not read: " + String.join(", ", failed));
+            }
+            @Override protected void process(List<String> chunks) { working.setText(chunks.get(chunks.size() - 1)); }
+            @Override protected void done() {
+                try { working.setText(get()); } catch (Exception e) { working.setText(rootMessage(e)); }
+                refill.run(); refreshTone();
+            }
+        }.execute();
+    }
+
+    /** Save take: the song's details (remembered: artist, album, year) and the selected take as release files. */
+    private void showSaveTake() {
+        if (last == null || rows.isEmpty() || playing <= 0 || playing > last.takes.size() || blind.hidden()) return;
+        MasterJob.Take take = last.takes.get(playing - 1);
+        JDialog d = new JDialog(SwingUtilities.getWindowAncestor(root), "Save " + take.label, Dialog.ModalityType.APPLICATION_MODAL);
+        JPanel body = column();
+        body.setBorder(new EmptyBorder(18, 20, 16, 20));
+        JPanel shell = new JPanel(new BorderLayout()); shell.setBackground(Look.BG); shell.add(body, BorderLayout.CENTER);
+        d.setContentPane(shell);
+        body.add(text("SAVE " + take.label.toUpperCase(Locale.ROOT), Look.size(Look.label, 13), Look.AMBER_DIM));
+        body.add(gap(6));
+        body.add(text("Written into the files: WAV (24-bit and 16-bit 44.1 kHz) and MP3 320, plus the session sheet.", Look.size(Look.body, 13), Look.MID));
+        body.add(gap(12));
+        String songTitle = last.dir.getParentFile().getName();
+        JTextField title = field(songTitle, 320), artist = field(PREFS.get("artist", ""), 320), album = field(PREFS.get("album", ""), 320),
+            year = field(PREFS.get("year", ""), 120), track = field("", 120), isrc = field("", 200);
+        String[] labels = {"Title", "Artist", "Album", "Year", "Track", "ISRC"};
+        JTextField[] fields = {title, artist, album, year, track, isrc};
+        for (int i = 0; i < labels.length; i++) {
+            JPanel r = row();
+            JLabel l = text(labels[i], Look.size(Look.body, 14), Look.MID);
+            Dimension w = new Dimension(70, l.getPreferredSize().height); l.setPreferredSize(w); l.setMaximumSize(w);
+            r.add(l); r.add(fields[i]); r.add(Box.createHorizontalGlue());
+            body.add(r); body.add(gap(6));
+        }
+        if (Library.albumOn()) { body.add(gap(4)); body.add(text("It also joins the album \"" + Library.albumName() + "\".", Look.size(Look.body, 13), Look.AMBER)); }
+        body.add(gap(14));
+        JLabel working = text(" ", Look.size(Look.body, 13), Look.AMBER);
+        JPanel buttons = row();
+        JButton ok = button("Save", true), cancel = button("Cancel", false);
+        ok.setPreferredSize(new Dimension(120, 38)); ok.setMaximumSize(ok.getPreferredSize());
+        cancel.setPreferredSize(new Dimension(110, 38)); cancel.setMaximumSize(cancel.getPreferredSize());
+        buttons.add(ok); buttons.add(Box.createHorizontalStrut(10)); buttons.add(cancel); buttons.add(Box.createHorizontalStrut(12)); buttons.add(working);
+        body.add(buttons);
+        cancel.addActionListener(e -> d.dispose());
+        ok.addActionListener(e -> {
+            Release.Info info = new Release.Info();
+            info.title = title.getText().trim().isEmpty() ? songTitle : title.getText().trim();
+            info.artist = artist.getText().trim(); info.album = album.getText().trim(); info.year = year.getText().trim();
+            info.track = track.getText().trim(); info.isrc = isrc.getText().trim().replace("-", "");
+            PREFS.put("artist", info.artist); PREFS.put("album", info.album); PREFS.put("year", info.year);
+            ok.setEnabled(false); cancel.setEnabled(false);
+            working.setText("Saving…");
+            final File saveRoot = last.dir.getParentFile().getParentFile();
+            final MasterJob.Outcome o = last;
+            new SwingWorker<File[], Void>() {
+                @Override protected File[] doInBackground() throws Exception {
+                    return TakeSaver.save(take, info, saveRoot, o.sheet, o.targetLufs, o.style);
+                }
+                @Override protected void done() {
+                    try {
+                        File[] files = get();
+                        d.dispose();
+                        status.setText("Saved " + take.label + " as \"" + info.title + "\" in " + files[0].getParent());
+                        status.setToolTipText(files[0].getParent());
+                        refreshTone();
+                    } catch (Exception x) {
+                        working.setText("Could not save: " + rootMessage(x));
+                        ok.setEnabled(true); cancel.setEnabled(true);
+                    }
+                }
+            }.execute();
+        });
+        d.pack();
+        d.setSize(Math.max(560, d.getWidth()), d.getHeight());
+        d.setLocationRelativeTo(root);
+        d.setVisible(true);
+    }
+
+    private static JTextField field(String value, int width) {
+        JTextField f = new JTextField(value);
+        f.setFont(Look.size(Look.body, 14));
+        f.setForeground(Look.TEXT); f.setBackground(Look.WELL); f.setCaretColor(Look.AMBER);
+        f.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(Look.LINE), new EmptyBorder(4, 8, 4, 8)));
+        Dimension d = new Dimension(width, 32);
+        f.setPreferredSize(d); f.setMaximumSize(d);
+        return f;
     }
 
     /** While balancing stems: the stems summed as they came, at rest; the balance as heard, playing. */
@@ -395,6 +657,10 @@ final class MainWindow {
         s.song = song; s.style = (Target.Style) style.getSelectedItem(); s.lufs = LEVELS[level.getSelectedIndex()];
         s.commercial = commercial.isSelected(); s.cleanUp = cleanUp.isSelected(); s.mp3 = mp3.isSelected();
         s.outRoot = outRoot;
+        boolean ownTone = Library.albumRecords().size() > 0 || !Library.records(s.style).isEmpty();
+        s.target = ownTone ? Library.target(s.style, s.commercial) : null;
+        s.yours = Library.yours(s.style);
+        s.albumCheck = Library.albumOn();
         if (stems != null) {
             s.use(stems); s.stemAuto = !stemManual;
             s.trackDb = stemDb.clone(); s.trackMute = stemMute.clone(); s.stemRide = stemRide; s.stemReading = stemReading;
@@ -435,13 +701,13 @@ final class MainWindow {
     }
 
     // ---------- Listening ----------
-    record Row(String name, String about, double lufs, double peak, double ceiling, double lra, double[] mid, String verdict, String streaming, boolean original) {}
+    record Row(String name, String about, double lufs, double peak, double ceiling, double lra, double[] mid, double[] side, double punch, String verdict, String streaming, boolean original) {}
 
     static List<Row> rowsFor(MasterJob.Outcome o) {
         List<Row> r = new ArrayList<>();
         r.add(new Row("Original", o.stemNotes.isEmpty() ? "The song as it came in, before mastering" : "The stems summed as they came, before mastering",
-            o.beforeLufs, o.beforePeak, Double.NaN, o.beforeLra, o.beforeMid, "As it came in", "", true));
-        for (MasterJob.Take t : o.takes) r.add(new Row(t.label, t.about, t.lufs, t.truePeak, t.ceiling, t.lra, t.mid, t.verdict, t.streaming, false));
+            o.beforeLufs, o.beforePeak, Double.NaN, o.beforeLra, o.beforeMid, o.beforeSide, o.beforePunch, "As it came in", "", true));
+        for (MasterJob.Take t : o.takes) r.add(new Row(t.label, t.about, t.lufs, t.truePeak, t.ceiling, t.lra, t.mid, t.side, t.punch, t.verdict, t.streaming, false));
         return r;
     }
 
@@ -572,7 +838,7 @@ final class MainWindow {
                     for (Row x : rows) names.append(names.length() == 0 ? "" : ", ").append(x.name);
                     File outRootOfRound = last.dir.getParentFile().getParentFile();
                     File f = Blind.log(outRootOfRound, last.dir.getParentFile().getName(), last.settings, rows.get(v).name, names.toString());
-                    Blind.taste(outRootOfRound, last.style, rows.get(v).original ? "Source" : rows.get(v).name);
+                    Library.remember(last.style, "blind", rows.get(v).original ? "Source" : rows.get(v).name);
                     note = " Saved to " + f.getName() + ".";
                 } catch (Exception e) {
                     note = " (Could not save the pick: " + rootMessage(e) + ")";
@@ -919,21 +1185,24 @@ final class MainWindow {
     }
 
     // ---------- Results ----------
-    private static final int TOP = 46, ROW = 46;
+    private static final int TOP = 46, ROW = 46, ROW5 = 40;
+
+    /** Four rows (Original and three takes) at 46; with a Yours take, five at 40. */
+    private int rowHeight() { return rows.size() > 4 ? ROW5 : ROW; }
 
     final class ResultsView extends JComponent {
         private MasterJob.Outcome o;
         ResultsView() {
-            int h = TOP + 4 * ROW + 40;
+            int h = TOP + 5 * ROW5 + 40;
             setPreferredSize(new Dimension(800, h)); setMaximumSize(new Dimension(Integer.MAX_VALUE, h)); setMinimumSize(new Dimension(300, h));
             addMouseListener(new MouseAdapter() {
-                @Override public void mousePressed(MouseEvent e) { if (e.getY() >= TOP) selectRow((e.getY() - TOP) / ROW); }
+                @Override public void mousePressed(MouseEvent e) { if (e.getY() >= TOP) selectRow((e.getY() - TOP) / rowHeight()); }
             });
             setToolTipText("");
         }
         @Override public String getToolTipText(MouseEvent e) {
-            int r = e.getY() < TOP ? -1 : (e.getY() - TOP) / ROW;
-            if (o == null || r < 0 || r >= rows.size() || r >= 4 || blind.hidden()) return null;
+            int r = e.getY() < TOP ? -1 : (e.getY() - TOP) / rowHeight();
+            if (o == null || r < 0 || r >= rows.size() || blind.hidden()) return null;
             Row t = rows.get(blind.version(r));
             return "<html><b>" + esc(t.name) + "</b><br>" + esc(t.about) + (t.original ? "" : "<br>" + esc(t.verdict) + "<br>" + esc(t.streaming)) + "</html>";
         }
@@ -957,7 +1226,8 @@ final class MainWindow {
             }
             double[] trim = trims();
             boolean matched = match.isSelected(), hide = blind.hidden(), reveal = blind.state == Blind.State.RESULTS;
-            for (int r = 0; r < rows.size() && r < 4; r++) {
+            final int ROW = rowHeight();
+            for (int r = 0; r < rows.size(); r++) {
                 int v = blind.version(r);
                 Row t = rows.get(v);
                 int top = TOP + r * ROW, y = top + 21;

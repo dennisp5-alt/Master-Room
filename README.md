@@ -88,4 +88,12 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   and a level (more than six in two columns), and the live player plays each file on its own. The auto balance still
   decides per engine stem (Vocals, Drums, Bass, Other…) and every file of that stem shows the level it got. Set by
   hand, a stem made of several files is the unmuted files added at their own levels; the sheet lists them.
-- Next builds: references and settings, polish and an icon.
+- **Build 5, references, album and saving (from the phone):** TONE FROM on the console shows what sets the tone;
+  **Records…** keeps 3 to 5 reference records per style (only their measured numbers) and runs album match. Album
+  first, then records, then the style's built-in curve, as on the phone; an album with saved songs also sets the
+  loudness, and the session sheet checks each take against it. **Save take** writes the selected take as tagged
+  release files (24-bit and 16-bit WAV with LIST INFO, MP3 320 with ID3, plus the sheet) into `Saved`, adds it to the
+  album and counts it for the taste. After 8 picks a **Yours** take (blend of your picks) joins every round. With
+  records or an album, the console compares the selected take on punch, low end and width, and names the closest.
+  The meter shows the ceiling. Kept in `%APPDATA%\Master Room` in the phone's file formats.
+- Next build: remember the last round and stems, import a Stem Lab master to compare, polish and an icon.
