@@ -67,6 +67,9 @@ public final class MasterJob {
         /** Measured tone (31 third-octave bands, mid and side), for the console, the album and the records gap. */
         public double[] mid, side;
         public File[] files;
+        /** "take" (this round), "earlier" (the round before, same song, kept to compare) or "imported" (a master from elsewhere). */
+        public String kind = "take";
+        public boolean isTake() { return kind.equals("take"); }
     }
 
     public static final class Outcome {
@@ -90,6 +93,10 @@ public final class MasterJob {
         public double seconds;
         /** For stems: what the balance did, in words (also on the session sheet). */
         public final List<String> stemNotes = new ArrayList<>();
+        /** What was mastered: the song's path, or "stems:" and the title. A new round of the same keeps the last one to compare. */
+        public String sourceKey = "";
+        /** A short name for this round's settings, for earlier takes: "Country -14". */
+        public String shortSettings = "";
     }
 
     public interface Listener { void progress(String step, int percent); }
@@ -231,6 +238,8 @@ public final class MasterJob {
         Outcome out = new Outcome();
         out.dir = dir;
         out.settings = describe(s);
+        out.sourceKey = s.stems != null ? "stems:" + (s.stemTitle == null ? "Stems" : s.stemTitle) : s.song.getAbsolutePath();
+        out.shortSettings = s.style.label + String.format(Locale.US, " %.0f", s.lufs) + (s.stems != null && !s.stemAuto ? " own balance" : "");
         listener.progress(s.stems != null ? "Opening the stems" : "Opening the song", 0);
         // With stems, the source is the stems summed as they came (the song as it came), as on the phone.
         Audio in = s.stems != null ? Stems.mix(s.stems, null, null) : open(s.song);

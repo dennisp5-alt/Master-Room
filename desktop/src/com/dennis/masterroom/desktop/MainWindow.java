@@ -37,7 +37,8 @@ import java.util.prefs.Preferences;
  * phone's Stem Lab (auto balance and vocal rides, solo, mute, nudges), heard live and mastered.
  */
 final class MainWindow {
-    private static final Preferences PREFS = Preferences.userNodeForPackage(MainWindow.class);
+    /** Where the app keeps its places and the last session (the checks use their own node). */
+    static final Preferences PREFS = Preferences.userRoot().node(System.getProperty("masterroom.prefs", "/com/dennis/masterroom/desktop"));
     private static final double[] LEVELS = {-16, -14, -13, -12, -11, -10, -9, -8};
 
     final JPanel root = new JPanel(new BorderLayout());
@@ -90,19 +91,24 @@ final class MainWindow {
     private final JPanel bench = new JPanel(new CardLayout());
     private final JButton stemsTab = segment("STEM BALANCE"), takesTab = segment("TAKES");
     private final JPanel benchSwitch = row();
-    private StemFiles.Loaded stems;
+    StemFiles.Loaded stems;
     private StemMixer stemMix;
     private Stems.Reading stemReading;
     private Stems.Balance stemAuto;
-    private boolean stemManual, onStems;
+    boolean stemManual, onStems;
     /** Per file of the set (Suno's stems one by one): level, mute (also in the master) and solo (listening only). */
-    private double[] stemDb = new double[0];
-    private boolean[] stemMute = new boolean[0], stemSolo = new boolean[0];
+    double[] stemDb = new double[0];
+    boolean[] stemMute = new boolean[0], stemSolo = new boolean[0];
     private float[] stemRide;
     private Listen stemListen;
     private float[] stemPeaks;
+    // Rounds kept and compared (build 6)
+    /** The round before (same song) kept to compare, and masters brought in from elsewhere. */
+    List<MasterJob.Take> extras = new ArrayList<>();
+    /** The takes on screen after the Original, in row order: this round's, then the extras. */
+    List<MasterJob.Take> shown = List.of();
     private File song;
-    private MasterJob.Outcome last;
+    MasterJob.Outcome last;
     private boolean busy;
 
     MainWindow() {
@@ -129,7 +135,12 @@ final class MainWindow {
         middle.add(benchSwitch);
         middle.add(gap(8));
         bench.setOpaque(false); bench.setAlignmentX(0);
-        bench.add(results, "takes"); bench.add(stemsView, "stems");
+        JScrollPane resultsScroll = new JScrollPane(results, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        resultsScroll.setBorder(BorderFactory.createEmptyBorder());
+        resultsScroll.setOpaque(false); resultsScroll.getViewport().setOpaque(false);
+        resultsScroll.getVerticalScrollBar().setUnitIncrement(20);
+        resultsScroll.getVerticalScrollBar().setPreferredSize(new Dimension(10, 0));
+        bench.add(resultsScroll, "takes"); bench.add(stemsView, "stems");
         int benchHeight = TOP + 5 * ROW5 + 40;
         bench.setPreferredSize(new Dimension(800, benchHeight)); bench.setMaximumSize(new Dimension(Integer.MAX_VALUE, benchHeight));
         middle.add(bench);
@@ -217,7 +228,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 5 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 6 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -364,7 +375,8 @@ final class MainWindow {
         if (peaksByVersion != null && any) wave.peaks = peaksByVersion[hide ? 0 : Math.min(playing, peaksByVersion.length - 1)];
         consoleMode.setText(!any ? " " : player.isPlaying() || meter.playing() ? "PLAYING  ·  AS HEARD" : hide ? "BLIND TEST" : "SELECTED  ·  " + cur.name.toUpperCase(Locale.ROOT));
         gapLine.setText(gapText(cur, hide));
-        saveTake.setEnabled(any && !hide && !cur.original && last != null && !busy && !onStems);
+        saveTake.setEnabled(any && !hide && !cur.original && last != null && !busy && !onStems
+            && playing - 1 < shown.size() && shown.get(playing - 1).files.length >= 2);
         meter.repaint(); lights.repaint(); readLufs.repaint(); readPeak.repaint(); readRange.repaint(); wave.repaint();
     }
 
@@ -524,8 +536,9 @@ final class MainWindow {
 
     /** Save take: the song's details (remembered: artist, album, year) and the selected take as release files. */
     private void showSaveTake() {
-        if (last == null || rows.isEmpty() || playing <= 0 || playing > last.takes.size() || blind.hidden()) return;
-        MasterJob.Take take = last.takes.get(playing - 1);
+        if (last == null || rows.isEmpty() || playing <= 0 || playing > shown.size() || blind.hidden()) return;
+        MasterJob.Take take = shown.get(playing - 1);
+        if (take.files.length < 2) return;
         JDialog d = new JDialog(SwingUtilities.getWindowAncestor(root), "Save " + take.label, Dialog.ModalityType.APPLICATION_MODAL);
         JPanel body = column();
         body.setBorder(new EmptyBorder(18, 20, 16, 20));
@@ -665,6 +678,8 @@ final class MainWindow {
             s.use(stems); s.stemAuto = !stemManual;
             s.trackDb = stemDb.clone(); s.trackMute = stemMute.clone(); s.stemRide = stemRide; s.stemReading = stemReading;
         }
+        final MasterJob.Outcome before = last;
+        final List<MasterJob.Take> beforeExtras = extras;
         player.use(null);
         stopListening();
         setBusy(true);
@@ -676,6 +691,7 @@ final class MainWindow {
                 setBusy(false);
                 try {
                     last = get();
+                    extras = keptFrom(before, beforeExtras, last);
                     results.show(last);
                     progress.setValue(100);
                     status.setText(String.format(Locale.US, "Done in %.1f minutes. Takes are in %s", last.seconds / 60, last.dir.getAbsolutePath()));
@@ -683,10 +699,101 @@ final class MainWindow {
                     folder.setEnabled(true); sheet.setEnabled(true);
                     showBench(false);
                     loadListening(last);
+                    keepRound();
                 } catch (Exception e) {
                     String m = rootMessage(e);
                     status.setText(m.contains("Stopped") ? "Stopped. Nothing was finished from this round." : "It did not finish: " + m);
                     progress.setValue(0);
+                }
+            }
+        }.execute();
+    }
+
+    /**
+     * As on the phone: a new round of the same song (or stems) keeps the round before's takes to compare,
+     * named with their settings ("Warm · Country -14"), along with any imported masters. Another song starts clean.
+     */
+    static List<MasterJob.Take> keptFrom(MasterJob.Outcome before, List<MasterJob.Take> beforeExtras, MasterJob.Outcome now) {
+        List<MasterJob.Take> kept = new ArrayList<>();
+        if (before == null || !before.sourceKey.equals(now.sourceKey)) return kept;
+        for (MasterJob.Take t : before.takes) {
+            MasterJob.Take e = copy(t);
+            e.kind = "earlier";
+            e.label = t.label + " · " + before.shortSettings;
+            e.about = "Earlier round, " + before.shortSettings + ": " + t.about;
+            kept.add(e);
+        }
+        for (MasterJob.Take t : beforeExtras) if (t.kind.equals("imported")) kept.add(t);
+        return kept;
+    }
+
+    private static MasterJob.Take copy(MasterJob.Take t) {
+        MasterJob.Take c = new MasterJob.Take();
+        c.label = t.label; c.about = t.about; c.verdict = t.verdict; c.streaming = t.streaming; c.report = t.report;
+        c.lufs = t.lufs; c.truePeak = t.truePeak; c.ceiling = t.ceiling; c.lra = t.lra; c.punch = t.punch;
+        c.mid = t.mid; c.side = t.side; c.files = t.files; c.kind = t.kind;
+        return c;
+    }
+
+    /** Keeps the round (and what is compared with it) so the app opens here next time. */
+    private void keepRound() {
+        if (last == null) return;
+        try {
+            RoundStore.save(last, extras);
+            PREFS.put("lastRound", last.dir.getAbsolutePath());
+        } catch (Exception e) {
+            status.setToolTipText("Could not keep this round for next time: " + rootMessage(e));
+        }
+    }
+
+    /** Brings back the round left open last time, if its files are still there. */
+    void restoreRound() {
+        String at = PREFS.get("lastRound", "");
+        if (at.isEmpty()) return;
+        RoundStore.Round r = RoundStore.load(new File(at));
+        if (r == null) return;
+        last = r.outcome();
+        extras = r.extras();
+        if (!last.sourceKey.startsWith("stems:")) {
+            File f = new File(last.sourceKey);
+            if (f.isFile()) song = f;
+            songName.setText(f.getName());
+        } else {
+            songName.setText(last.sourceKey.substring(6));
+        }
+        songFacts.setText(String.format(Locale.US, "As it came in%s: %.1f LUFS, %.1f LU range, %.1f dBTP true peak",
+            last.sourceKey.startsWith("stems:") ? " (stems summed)" : "", last.beforeLufs, last.beforeLra, last.beforePeak));
+        results.show(last);
+        progress.setValue(100);
+        status.setText("Your last round is back: " + last.settings + ". Takes are in " + last.dir.getAbsolutePath());
+        folder.setEnabled(true); sheet.setEnabled(true);
+        master.setEnabled(song != null || stems != null);
+        loadListening(last);
+    }
+
+    /** A master made elsewhere (Stem Lab on the phone, another tool), to compare level-matched with the takes. */
+    private void importMaster() {
+        if (last == null || busy) return;
+        JFileChooser fc = new JFileChooser(PREFS.get("importDir", PREFS.get("lastDir", System.getProperty("user.home"))));
+        fc.setDialogTitle("A master to compare with " + last.dir.getParentFile().getName());
+        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Audio (" + String.join(", ", MasterJob.READS) + ")", MasterJob.READS));
+        if (fc.showOpenDialog(root) != JFileChooser.APPROVE_OPTION) return;
+        File f = fc.getSelectedFile();
+        PREFS.put("importDir", f.getParent() == null ? "" : f.getParent());
+        final MasterJob.Outcome o = last;
+        status.setText("Measuring " + f.getName() + "…");
+        new SwingWorker<MasterJob.Take, Void>() {
+            @Override protected MasterJob.Take doInBackground() throws Exception { return Importer.take(f, o); }
+            @Override protected void done() {
+                try {
+                    MasterJob.Take t = get();
+                    if (o != last) return;
+                    extras.add(t);
+                    loadListening(last);
+                    keepRound();
+                    status.setText("Added " + f.getName() + " to compare. It plays level-matched like the takes.");
+                } catch (Exception e) {
+                    status.setText("Could not bring in that master: " + rootMessage(e));
                 }
             }
         }.execute();
@@ -703,19 +810,30 @@ final class MainWindow {
     // ---------- Listening ----------
     record Row(String name, String about, double lufs, double peak, double ceiling, double lra, double[] mid, double[] side, double punch, String verdict, String streaming, boolean original) {}
 
-    static List<Row> rowsFor(MasterJob.Outcome o) {
+    static List<Row> rowsFor(MasterJob.Outcome o) { return rowsFor(o, o.takes); }
+
+    static List<Row> rowsFor(MasterJob.Outcome o, List<MasterJob.Take> takes) {
         List<Row> r = new ArrayList<>();
         r.add(new Row("Original", o.stemNotes.isEmpty() ? "The song as it came in, before mastering" : "The stems summed as they came, before mastering",
             o.beforeLufs, o.beforePeak, Double.NaN, o.beforeLra, o.beforeMid, o.beforeSide, o.beforePunch, "As it came in", "", true));
-        for (MasterJob.Take t : o.takes) r.add(new Row(t.label, t.about, t.lufs, t.truePeak, t.ceiling, t.lra, t.mid, t.side, t.punch, t.verdict, t.streaming, false));
+        for (MasterJob.Take t : takes) r.add(new Row(t.label, t.about, t.lufs, t.truePeak, t.ceiling, t.lra, t.mid, t.side, t.punch, t.verdict, t.streaming, false));
         return r;
+    }
+
+    private static List<MasterJob.Take> together(MasterJob.Outcome o, List<MasterJob.Take> extras) {
+        List<MasterJob.Take> all = new ArrayList<>(o.takes);
+        all.addAll(extras);
+        return all;
     }
 
     /** Playback trim per version (dB) with level match on: the same rule the player uses. */
     private double[] trims() {
         double[] lufs = new double[rows.size()], peak = new double[rows.size()];
         boolean[] master = new boolean[rows.size()];
-        for (int i = 0; i < rows.size(); i++) { lufs[i] = rows.get(i).lufs; peak[i] = rows.get(i).peak; master[i] = !rows.get(i).original; }
+        for (int i = 0; i < rows.size(); i++) {
+            lufs[i] = rows.get(i).lufs; peak[i] = rows.get(i).peak;
+            master[i] = !rows.get(i).original && (i - 1 >= shown.size() || shown.get(i - 1).isTake());
+        }
         return AbMixer.matchDb(lufs, peak, master);
     }
 
@@ -726,20 +844,26 @@ final class MainWindow {
         refreshConsole();
     }
 
-    /** Opens the original and the 24-bit takes for playback (files are only read). */
+    /**
+     * Opens the original and the 24-bit takes for playback (files are only read): this round's, then the round
+     * before (kept to compare) and imported masters. Only this round's takes set the level-match reference.
+     */
     private void loadListening(MasterJob.Outcome o) {
-        showRows(rowsFor(o), o);
+        final List<MasterJob.Take> takes = together(o, extras);
+        shown = takes;
+        showRows(rowsFor(o, takes), o);
         status.setToolTipText(o.settings);
+        results.revalidate();
         new SwingWorker<float[][], Void>() {
             @Override protected float[][] doInBackground() throws Exception {
                 player.mix.clear();
                 player.mix.add(new AbMixer.Version("Original", o.source, o.beforeLufs, o.beforePeak, false));
-                for (MasterJob.Take t : o.takes) player.mix.add(new AbMixer.Version(t.label, t.files[0], t.lufs, t.truePeak, true));
+                for (MasterJob.Take t : takes) player.mix.add(new AbMixer.Version(t.label, t.files[0], t.lufs, t.truePeak, t.isTake()));
                 player.mix.setMatched(true);
                 player.mix.select(0);
-                float[][] peaks = new float[1 + o.takes.size()][];
+                float[][] peaks = new float[1 + takes.size()][];
                 peaks[0] = Overview.peaks(o.source, 1600);
-                for (int i = 0; i < o.takes.size(); i++) peaks[i + 1] = Overview.peaks(o.takes.get(i).files[0], 1600);
+                for (int i = 0; i < takes.size(); i++) peaks[i + 1] = Overview.peaks(takes.get(i).files[0], 1600);
                 return peaks;
             }
             @Override protected void done() {
@@ -838,7 +962,7 @@ final class MainWindow {
                     for (Row x : rows) names.append(names.length() == 0 ? "" : ", ").append(x.name);
                     File outRootOfRound = last.dir.getParentFile().getParentFile();
                     File f = Blind.log(outRootOfRound, last.dir.getParentFile().getName(), last.settings, rows.get(v).name, names.toString());
-                    Library.remember(last.style, "blind", rows.get(v).original ? "Source" : rows.get(v).name);
+                    Library.remember(last.style, "blind", rows.get(v).original ? "Source" : rows.get(v).name.split(" · ")[0]);
                     note = " Saved to " + f.getName() + ".";
                 } catch (Exception e) {
                     note = " (Could not save the pick: " + rootMessage(e) + ")";
@@ -938,7 +1062,10 @@ final class MainWindow {
         if (fc.showOpenDialog(root) == JFileChooser.APPROVE_OPTION && fc.getSelectedFiles().length > 0) loadStems(List.of(fc.getSelectedFiles()));
     }
 
-    private void loadStems(List<File> files) {
+    void loadStems(List<File> files) { loadStems(files, false); }
+
+    /** @param restoring bringing back the stems from last time: keep the round and the saved balance */
+    private void loadStems(List<File> files, boolean restoring) {
         if (busy) return;
         PREFS.put("lastDir", files.get(0).getParent() == null ? "" : files.get(0).getParent());
         songFacts.setText("Bringing in the stems…");
@@ -958,7 +1085,7 @@ final class MainWindow {
             @Override protected void done() {
                 try {
                     Measured m = get();
-                    useStems(m.loaded(), m.listen(), m.peaks(), m.reading());
+                    useStems(m.loaded(), m.listen(), m.peaks(), m.reading(), files, restoring);
                 } catch (Exception e) {
                     songFacts.setText("Could not use those stems: " + rootMessage(e));
                     master.setEnabled(!busy && (song != null || stems != null));
@@ -968,8 +1095,16 @@ final class MainWindow {
     }
 
     private void useStems(StemFiles.Loaded loaded, Listen listen, float[] peaks, Stems.Reading reading) throws java.io.IOException {
+        useStems(loaded, listen, peaks, reading, null, false);
+    }
+
+    private void useStems(StemFiles.Loaded loaded, Listen listen, float[] peaks, Stems.Reading reading, List<File> picked, boolean restoring) throws java.io.IOException {
+        // The balance as it was left (read before the auto balance below writes over it).
+        double[] keptDb = restoring ? csvToDoubles(PREFS.get("stems.db", "")) : new double[0];
+        String keptMute = restoring ? PREFS.get("stems.mute", "") : "";
+        boolean keptManual = restoring && PREFS.getBoolean("stems.manual", false);
         clearStems();
-        stopListening();
+        if (!restoring) stopListening();
         stems = loaded; stemListen = listen; stemPeaks = peaks; stemReading = reading;
         song = null;
         stemManual = false;
@@ -977,12 +1112,23 @@ final class MainWindow {
         stemDb = new double[n]; stemMute = new boolean[n]; stemSolo = new boolean[n];
         stemMix = new StemMixer(stems);
         applyAuto();
+        if (picked != null) {
+            StringBuilder b = new StringBuilder();
+            for (File f : picked) b.append(b.length() == 0 ? "" : "\n").append(f.getAbsolutePath());
+            PREFS.put("stems.files", b.toString());
+        }
+        if (keptManual && keptDb.length == n && keptMute.length() == n) {
+            // Set by hand last time: the levels and mutes as they were left.
+            stemManual = true;
+            for (int t = 0; t < n; t++) { stemDb[t] = keptDb[t]; stemMute[t] = keptMute.charAt(t) == '1'; }
+            stemsChanged();
+        }
         songName.setText(stems.title + "  (" + stems.tracks.size() + " stems)");
         songFacts.setText(String.format(Locale.US, "As it came in (stems summed): %.1f LUFS, %.1f LU range, %.1f dBTP true peak",
             stemListen.loudness.integrated, stemListen.loudness.lra, stemListen.truePeakDb));
         benchSwitch.setVisible(true);
         stemsView.rebuild();
-        showBench(true);
+        showBench(!restoring || !PREFS.get("view", "stems").equals("takes") || last == null);
         master.setEnabled(!busy);
         status.setText(stems.notes.isEmpty() ? "Stems loaded. Listen to the balance, then press Master."
             : "Stems loaded. " + String.join(". ", stems.notes) + ".");
@@ -997,6 +1143,7 @@ final class MainWindow {
         stems.discard();
         stems = null; stemMix = null; stemReading = null; stemAuto = null; stemRide = null; stemListen = null; stemPeaks = null;
         stemManual = false; onStems = false;
+        for (String k : new String[]{"stems.files", "stems.db", "stems.mute", "stems.manual"}) PREFS.remove(k);
         benchSwitch.setVisible(false);
         ((CardLayout) bench.getLayout()).show(bench, "takes");
         refreshControls();
@@ -1005,6 +1152,7 @@ final class MainWindow {
     private void showBench(boolean wantStems) {
         boolean st = wantStems && stems != null;
         onStems = st;
+        if (stems != null) PREFS.put("view", st ? "stems" : "takes");
         player.use(st ? stemMix : null);
         ((CardLayout) bench.getLayout()).show(bench, st ? "stems" : "takes");
         stemsTab.putClientProperty("on", st); takesTab.putClientProperty("on", !st);
@@ -1044,9 +1192,33 @@ final class MainWindow {
     private void stemsChanged() {
         if (stemMix != null) stemMix.setGains(stemGains(), stemRide);
         stemsView.draw();
+        if (stems != null) {
+            StringBuilder db = new StringBuilder(), mute = new StringBuilder();
+            for (int t = 0; t < stemDb.length; t++) { db.append(t == 0 ? "" : ",").append(stemDb[t]); mute.append(stemMute[t] ? '1' : '0'); }
+            PREFS.put("stems.db", db.toString()); PREFS.put("stems.mute", mute.toString()); PREFS.putBoolean("stems.manual", stemManual);
+        }
     }
 
-    private void stemNudge(int t, double db) {
+    private static double[] csvToDoubles(String s) {
+        if (s == null || s.isEmpty()) return new double[0];
+        try {
+            String[] p = s.split(",");
+            double[] d = new double[p.length];
+            for (int i = 0; i < p.length; i++) d[i] = Double.parseDouble(p[i]);
+            return d;
+        } catch (NumberFormatException e) { return new double[0]; }
+    }
+
+    /** Brings back the stems that were open last time (the files are read again; a ZIP is unpacked again). */
+    void restoreStems() {
+        String list = PREFS.get("stems.files", "");
+        if (list.isEmpty()) return;
+        List<File> files = new ArrayList<>();
+        for (String p : list.split("\n")) { File f = new File(p); if (!f.isFile()) return; files.add(f); }
+        loadStems(files, true);
+    }
+
+    void stemNudge(int t, double db) {
         stemManual = true;
         stemDb[t] = Math.max(-Stems.REACH_DB, Math.min(Stems.REACH_DB, Math.round((stemDb[t] + db) * 2) / 2.0));
         stemsChanged();
@@ -1190,23 +1362,41 @@ final class MainWindow {
     /** Four rows (Original and three takes) at 46; with a Yours take, five at 40. */
     private int rowHeight() { return rows.size() > 4 ? ROW5 : ROW; }
 
-    final class ResultsView extends JComponent {
+    /** The results table. Past five rows (the round before, imported masters) it scrolls. */
+    final class ResultsView extends JComponent implements Scrollable {
         private MasterJob.Outcome o;
+        private static final int LINK = 210;
         ResultsView() {
-            int h = TOP + 5 * ROW5 + 40;
-            setPreferredSize(new Dimension(800, h)); setMaximumSize(new Dimension(Integer.MAX_VALUE, h)); setMinimumSize(new Dimension(300, h));
             addMouseListener(new MouseAdapter() {
-                @Override public void mousePressed(MouseEvent e) { if (e.getY() >= TOP) selectRow((e.getY() - TOP) / rowHeight()); }
+                @Override public void mousePressed(MouseEvent e) {
+                    if (e.getY() >= TOP) selectRow((e.getY() - TOP) / rowHeight());
+                    else if (o != null && last == o && !blind.hidden() && e.getX() > getWidth() - LINK) importMaster();
+                }
+            });
+            addMouseMotionListener(new MouseAdapter() {
+                @Override public void mouseMoved(MouseEvent e) {
+                    boolean link = e.getY() < TOP && o != null && last == o && !blind.hidden() && e.getX() > getWidth() - LINK;
+                    setCursor(Cursor.getPredefinedCursor(link ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+                }
             });
             setToolTipText("");
         }
+        private int fixed() { return TOP + 5 * ROW5 + 40; }
+        @Override public Dimension getPreferredSize() { return new Dimension(800, Math.max(fixed(), TOP + rows.size() * rowHeight() + 40)); }
+        @Override public Dimension getPreferredScrollableViewportSize() { return new Dimension(800, fixed()); }
+        @Override public int getScrollableUnitIncrement(Rectangle r, int o, int d) { return rowHeight() / 2; }
+        @Override public int getScrollableBlockIncrement(Rectangle r, int o, int d) { return r.height - rowHeight(); }
+        @Override public boolean getScrollableTracksViewportWidth() { return true; }
+        @Override public boolean getScrollableTracksViewportHeight() { return getParent() != null && getParent().getHeight() > getPreferredSize().height; }
         @Override public String getToolTipText(MouseEvent e) {
+            if (e.getY() < TOP && o != null && last == o && e.getX() > getWidth() - LINK)
+                return "Bring in a master made elsewhere (Stem Lab on the phone, another tool) to compare, level-matched";
             int r = e.getY() < TOP ? -1 : (e.getY() - TOP) / rowHeight();
             if (o == null || r < 0 || r >= rows.size() || blind.hidden()) return null;
             Row t = rows.get(blind.version(r));
             return "<html><b>" + esc(t.name) + "</b><br>" + esc(t.about) + (t.original ? "" : "<br>" + esc(t.verdict) + "<br>" + esc(t.streaming)) + "</html>";
         }
-        void show(MasterJob.Outcome o) { this.o = o; if (o == null) rows = List.of(); repaint(); }
+        void show(MasterJob.Outcome o) { this.o = o; if (o == null) rows = List.of(); revalidate(); repaint(); }
         @Override protected void paintComponent(Graphics g0) {
             Graphics2D g = (Graphics2D) g0.create();
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -1218,6 +1408,11 @@ final class MainWindow {
             g.setFont(Look.size(Look.label, 13)); g.setColor(Look.AMBER_DIM);
             String[] heads = {"VERSION", "LOUDNESS", "TRUE PEAK", "PLAYS AT", "CHECK AND STREAMING"};
             for (int i = 0; i < heads.length; i++) g.drawString(heads[i], x[i], 28);
+            if (o != null && last == o && !blind.hidden()) {
+                String link = "+  COMPARE A MASTER";
+                g.setColor(Look.AMBER);
+                g.drawString(link, w - 18 - g.getFontMetrics().stringWidth(link), 28);
+            }
             g.setColor(Look.HAIR); g.drawLine(12, 40, w - 12, 40);
             if (o == null || rows.isEmpty()) {
                 g.setFont(Look.size(Look.body, 15)); g.setColor(Look.DIM);
@@ -1238,21 +1433,34 @@ final class MainWindow {
                 }
                 g.setFont(Look.size(Look.mono, 13)); g.setColor(sel ? Look.AMBER : Look.DIM); g.drawString(String.valueOf(r + 1), x[0], y);
                 g.setFont(Look.size(Look.strong, 17)); g.setColor(sel ? Look.AMBER : Look.TEXT);
-                g.drawString(hide ? "Version " + (r + 1) : t.name, x[0] + 20, y);
+                if (hide) g.drawString("Version " + (r + 1), x[0] + 20, y);
+                else {
+                    // An earlier round's take shows its name and a small EARLIER mark; its settings are in the line below.
+                    int cut = t.name.indexOf(" · ");
+                    String name = cut < 0 ? t.name : t.name.substring(0, cut);
+                    int room = x[1] - x[0] - 30;
+                    clip(g, name, x[0] + 20, y, room, g.getColor());
+                    if (cut >= 0) {
+                        int nw = g.getFontMetrics().stringWidth(name);
+                        g.setFont(Look.size(Look.label, 11)); g.setColor(Look.AMBER_DIM);
+                        if (nw + 8 + g.getFontMetrics().stringWidth("EARLIER") <= room) g.drawString("EARLIER", x[0] + 20 + nw + 8, y - 1);
+                    }
+                }
                 String about = hide ? "Name hidden until you pick" : reveal ? (r == blind.picked ? "Version " + (r + 1) + ", your pick" : "Version " + (r + 1)) : t.about;
                 g.setFont(Look.size(Look.body, 12)); g.setColor(reveal && r == blind.picked ? Look.AMBER : Look.DIM);
                 clip(g, about, x[0] + 20, y + 17, x[4] - x[0] - 36, g.getColor());
                 if (hide) continue;
                 g.setFont(Look.size(Look.mono, 14)); g.setColor(Look.MID);
                 g.drawString(String.format(Locale.US, "%.1f LUFS", t.lufs), x[1], y);
-                g.setColor(t.original || t.peak <= t.ceiling + 0.05 ? Look.MID : Look.HOT);
+                boolean made = !t.original && Double.isNaN(t.ceiling); // imported: measured, not checked against our ceiling
+                g.setColor(t.original || made || t.peak <= t.ceiling + 0.05 ? Look.MID : Look.HOT);
                 g.drawString(String.format(Locale.US, "%.1f dBTP", t.peak), x[2], y);
                 g.setColor(matched ? Look.BLUE : Look.DIM);
                 g.drawString(!matched ? "as is" : Math.abs(trim[v]) < 0.05 ? "0.0 dB" : String.format(Locale.US, "%+.1f dB", trim[v]), x[3], y);
                 g.setFont(Look.size(Look.body, 14));
-                clip(g, t.verdict, x[4], y, w - x[4] - 16, t.original ? Look.DIM : t.verdict.toLowerCase(Locale.ROOT).contains("passed") ? Look.BLUE : Look.HOT);
+                clip(g, t.verdict, x[4], y, w - x[4] - 16, t.original ? Look.DIM : made ? Look.MID : t.verdict.toLowerCase(Locale.ROOT).contains("passed") ? Look.BLUE : Look.HOT);
                 g.setFont(Look.size(Look.body, 12));
-                clip(g, t.streaming, x[4], y + 17, w - x[4] - 16, t.streaming.startsWith("Safe") ? Look.BLUE : Look.HOT);
+                clip(g, t.streaming, x[4], y + 17, w - x[4] - 16, made ? Look.DIM : t.streaming.startsWith("Safe") ? Look.BLUE : Look.HOT);
             }
             if (o.settings != null) {
                 g.setColor(Look.HAIR); g.drawLine(12, h - 34, w - 12, h - 34);
@@ -1465,6 +1673,10 @@ final class MainWindow {
     }
 
     static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy, boolean blindOn, boolean toneView, boolean stemsOn, boolean suno) throws Exception {
+        screenshot(png, w, h, demo, songLabel, busy, blindOn, toneView, stemsOn, suno, false);
+    }
+
+    static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy, boolean blindOn, boolean toneView, boolean stemsOn, boolean suno, boolean rounds) throws Exception {
         MainWindow m = new MainWindow();
         m.showTone(false);
         if (stemsOn) {
@@ -1499,7 +1711,15 @@ final class MainWindow {
         }
         if (songLabel != null) { m.songName.setText(songLabel); m.songFacts.setText("As it came in: -18.2 LUFS, 6.4 LU range, -3.1 dBTP true peak"); m.master.setEnabled(true); }
         if (demo != null) {
-            m.results.show(demo); m.showRows(rowsFor(demo), demo); m.progress.setValue(100); m.status.setText("Done in 1.4 minutes. Takes are in " + demo.dir); m.folder.setEnabled(true); m.sheet.setEnabled(true);
+            if (rounds) {
+                // A second round of the same song: the first round's takes kept beside it, and an imported master.
+                MasterJob.Outcome first = Demo.outcome();
+                first.shortSettings = "Classic Rock -12";
+                m.extras = keptFrom(first, List.of(Demo.imported()), demo);
+                m.last = demo;
+            }
+            m.shown = together(demo, m.extras);
+            m.results.show(demo); m.showRows(rowsFor(demo, m.shown), demo); m.progress.setValue(100); m.status.setText("Done in 1.4 minutes. Takes are in " + demo.dir); m.folder.setEnabled(true); m.sheet.setEnabled(true);
             float[] p = new float[1600];
             Random r = new Random(3);
             for (int i = 0; i < p.length; i++) { double env = i < 80 ? i / 80.0 : i > 1520 ? (1600 - i) / 80.0 : (i / 260) % 2 == 0 ? 0.55 : 0.85; p[i] = (float) (env * (0.75 + 0.25 * r.nextDouble())); }
@@ -1521,6 +1741,12 @@ final class MainWindow {
         if (busy) { m.song = new File("x.wav"); m.commercial.setSelected(true); m.cleanUp.setSelected(true); m.mp3.setSelected(false); m.setBusy(true); m.progress.setValue(78); m.status.setText("Punch: checking for distortion"); }
         m.root.setSize(w, h);
         layout(m.root);
+        if (rounds && m.results.getParent() instanceof JViewport vp) {
+            // Scrolled down to the earlier round and the imported master.
+            m.playing = m.rows.size() - 1;
+            vp.setViewPosition(new Point(0, Math.max(0, m.results.getPreferredSize().height - vp.getHeight())));
+            layout(m.root);
+        }
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = img.createGraphics();
         m.root.printAll(g);
@@ -1534,9 +1760,16 @@ final class MainWindow {
         if (c instanceof Container k) for (Component ch : k.getComponents()) layout(ch);
     }
 
+    /** Opens where it was left: the last round, then the stems (if they were open). */
+    void reopen() {
+        restoreRound();
+        restoreStems();
+    }
+
     void showFrame() {
         JFrame f = new JFrame("Master Room");
         f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        f.setIconImages(AppIcon.images());
         f.setContentPane(root);
         f.setMinimumSize(new Dimension(1300, 760));
         Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();

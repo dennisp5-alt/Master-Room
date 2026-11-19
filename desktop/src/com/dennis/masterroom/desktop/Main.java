@@ -20,7 +20,7 @@ public final class Main {
             boolean busy = Arrays.asList(args).contains("--busy");
             boolean blind = Arrays.asList(args).contains("--blind"), tone = Arrays.asList(args).contains("--tone"), suno = Arrays.asList(args).contains("--suno");
             boolean stemsOn = suno || Arrays.asList(args).contains("--stems");
-            MainWindow.screenshot(png, 1400, 780, demo, (demo != null || busy) && !stemsOn ? "Dusty Road (final mix).wav" : null, busy, blind, tone, stemsOn, suno);
+            MainWindow.screenshot(png, 1400, 780, demo, (demo != null || busy) && !stemsOn ? "Dusty Road (final mix).wav" : null, busy, blind, tone, stemsOn, suno, Arrays.asList(args).contains("--rounds"));
             System.out.println("SCREENSHOT " + png.getAbsolutePath());
             return;
         }
@@ -32,6 +32,7 @@ public final class Main {
             MainWindow w = new MainWindow();
             w.showFrame();
             if (args.length > 0 && new File(args[0]).isFile()) w.pick(new File(args[0]));
+            else w.reopen();
         });
     }
 }

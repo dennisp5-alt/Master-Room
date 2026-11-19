@@ -96,4 +96,10 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   album and counts it for the taste. After 8 picks a **Yours** take (blend of your picks) joins every round. With
   records or an album, the console compares the selected take on punch, low end and width, and names the closest.
   The meter shows the ceiling. Kept in `%APPDATA%\Master Room` in the phone's file formats.
-- Next build: remember the last round and stems, import a Stem Lab master to compare, polish and an icon.
+- **Build 6, picks up where you left off:** the app opens on the last round (takes ready to play) and on the stems
+  that were open, with a by-hand balance and mutes as they were left; the round is kept as `round.properties` in its
+  folder (numbers and file paths only), and anything moved or deleted is simply left out. Mastering the same song
+  or stems again keeps the round before beside the new one (marked EARLIER, with its settings, e.g. "Rock -14"), as
+  on the phone. **+ COMPARE A MASTER** brings in a master made elsewhere (Stem Lab, another tool), converted to the
+  song's sample rate if needed, measured like the takes and played level-matched with them. The app has its own
+  icon (the console's loudness arc), on the window, the program and the installer.
