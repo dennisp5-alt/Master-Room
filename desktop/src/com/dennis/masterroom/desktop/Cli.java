@@ -7,16 +7,20 @@ import java.util.Locale;
 
 /**
  * Command line, for checks and batch use:
- *   "Master Room.exe" --master song.wav [--style COUNTRY] [--level -14] [--out folder] [--commercial] [--no-cleanup] [--no-mp3]
+ *   "Master Room CLI.exe" --master song.wav [--style COUNTRY] [--level -14] [--out folder] [--commercial] [--no-cleanup] [--no-mp3]
+ *   "Master Room CLI.exe" --master --stems vocals.wav drums.wav bass.wav other.wav [same options]   (or --stems stems.zip)
+ * Stems use the auto balance, as the phone does unless adjusted by hand.
  */
 final class Cli {
     private Cli() {}
 
     static int run(String[] a) {
         MasterJob.Settings s = new MasterJob.Settings();
+        java.util.List<File> stems = new java.util.ArrayList<>();
         for (int i = 0; i < a.length; i++) {
             switch (a[i]) {
-                case "--master" -> s.song = new File(a[++i]);
+                case "--master" -> { if (i + 1 < a.length && !a[i + 1].startsWith("--")) s.song = new File(a[++i]); }
+                case "--stems" -> { while (i + 1 < a.length && !a[i + 1].startsWith("--")) stems.add(new File(a[++i])); }
                 case "--style" -> s.style = Target.Style.valueOf(a[++i].toUpperCase(Locale.ROOT));
                 case "--level" -> s.lufs = Double.parseDouble(a[++i]);
                 case "--out" -> s.outRoot = new File(a[++i]);
@@ -26,7 +30,15 @@ final class Cli {
                 default -> { }
             }
         }
-        if (s.song == null || !s.song.isFile()) { System.err.println("No song: --master <file>"); return 2; }
+        StemFiles.Loaded loaded = null;
+        if (!stems.isEmpty()) {
+            try {
+                loaded = StemFiles.load(stems);
+                s.use(loaded); s.stemAuto = true;
+                System.out.println("STEMS " + loaded.count() + " " + loaded.title);
+                for (String note : loaded.notes) System.out.println("PREP " + note);
+            } catch (Exception e) { System.err.println("FAILED " + e.getMessage()); return 2; }
+        } else if (s.song == null || !s.song.isFile()) { System.err.println("No song: --master <file>, or --master --stems <files or zip>"); return 2; }
         try {
             final int[] last = {-1};
             MasterJob.Outcome o = MasterJob.run(s, (step, p) -> {
@@ -36,11 +48,14 @@ final class Cli {
             for (MasterJob.Take t : o.takes)
                 System.out.printf(Locale.US, "TAKE %s %.2f LUFS TP %.2f (ceiling %.1f) | %s | %s%n", t.label, t.lufs, t.truePeak, t.ceiling, t.verdict, t.streaming);
             System.out.println("OUT " + o.dir.getAbsolutePath());
+            for (String note : o.stemNotes) System.out.println("STEM " + note);
             System.out.printf(Locale.US, "SECONDS %.1f%n", o.seconds);
             return 0;
         } catch (Exception e) {
             System.err.println("FAILED " + e);
             return 1;
+        } finally {
+            if (loaded != null) loaded.discard();
         }
     }
 }

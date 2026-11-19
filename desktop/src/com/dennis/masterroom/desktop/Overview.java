@@ -12,6 +12,19 @@ import java.io.InputStream;
 final class Overview {
     private Overview() {}
 
+    /** The same overview from audio already in memory. */
+    static float[] peaks(com.dennis.masterroom.engine.Audio a, int columns) {
+        float[] peaks = new float[columns];
+        int frames = a.l.length;
+        if (frames == 0) return peaks;
+        for (int i = 0; i < frames; i++) {
+            int c = (int) ((long) i * columns / frames);
+            float v = Math.max(Math.abs(a.l[i]), Math.abs(a.r[i]));
+            if (v > peaks[c]) peaks[c] = v;
+        }
+        return peaks;
+    }
+
     static float[] peaks(File wav, int columns) throws IOException {
         Wav.Header h = Wav.header(wav);
         float[] peaks = new float[columns];

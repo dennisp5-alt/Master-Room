@@ -70,4 +70,22 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   waveform follows the selected version. Everything is measured from the audio being heard, lined up with the sound
   card's position; numbers stay hidden in the blind test. Blind picks are also kept in the phone's taste format
   (`taste.txt`) for a Yours take later.
-- Next builds: stems, references and settings, polish.
+- **Build 4, stems:** **Open stems** (or drop the WAVs, or Stem Studio's ZIP); each file is placed by the stem word in
+  its name. The STEM BALANCE view shows the phone's auto balance in words, with solo (listening only), mute (also in
+  the master) and 0.5 dB nudges per stem; Back to auto returns to the app's balance. Play hears the balance live
+  through the console. Master renders exactly as the phone does: the stems summed as they came are the source, then
+  vocals and other instruments are treated on their own, the stems balanced (with the vocal rides) and mastered.
+  `StemCheck` requires the takes to be byte-identical to the phone's engine sequence. CLI:
+  `"Master Room CLI.exe" --master --stems <WAVs or ZIP>`.
+- **Build 4.1, Suno stems:** Suno's download (numbered files such as `7 Vocals.wav`, `6 Backing_Vocals.wav`, extra
+  stems, the full mix as `0 Song Name.wav`, 32-bit float, ZIP sizes only in the central directory) now loads: the
+  full mix is left out and gives the title; Vocals + Backing Vocals, Drums + Percussion, and FX, Synth, Sample,
+  Strings and the like into Other are added sample for sample into one float WAV each; Keyboard goes with Piano;
+  a core stem a set lacks is stood in for by silence (never given a level). All of it is listed on the session sheet.
+- **Build 4.2:** Suno downloads that start with a stem (`0 Lead Vocals.wav`, no full mix) keep it: only a number-0 file
+  that names no stem is taken for the full mix. Numbered sets take the title from the ZIP or folder name.
+- **Build 4.3, every file its own row:** Stem Studio's 4 to 6 stems and Suno's up to 12 each get a row with solo, mute
+  and a level (more than six in two columns), and the live player plays each file on its own. The auto balance still
+  decides per engine stem (Vocals, Drums, Bass, Other…) and every file of that stem shows the level it got. Set by
+  hand, a stem made of several files is the unmuted files added at their own levels; the sheet lists them.
+- Next builds: references and settings, polish and an icon.

@@ -38,6 +38,47 @@ final class Demo {
         return o;
     }
 
+    /**
+     * Four synthetic stems (sung tone with phrases and vibrato, kick and snare, bass, chord pad) for
+     * screenshots and checks, so no real song is ever needed or committed.
+     */
+    static File[] writeStems(File dir, String title, int seconds) throws java.io.IOException {
+        int rate = 48000, n = seconds * rate;
+        String[] parts = {"Vocals", "Drums", "Bass", "Other"};
+        File[] out = new File[4];
+        java.util.Random rnd = new java.util.Random(11);
+        for (int p = 0; p < 4; p++) {
+            com.dennis.masterroom.engine.Audio a = new com.dennis.masterroom.engine.Audio(n, rate);
+            double phase = 0;
+            for (int i = 0; i < n; i++) {
+                double t = i / (double) rate, v;
+                switch (p) {
+                    case 0 -> {
+                        double phrase = Math.max(0, Math.sin(Math.PI * (t % 2.0) / 2.0));
+                        phase += 2 * Math.PI * (220 + 4 * Math.sin(2 * Math.PI * 5.5 * t)) * (1 + 0.12 * Math.floor((t % 8) / 2)) / rate;
+                        v = phrase * (0.18 * Math.sin(phase) + 0.07 * Math.sin(2 * phase) + 0.04 * Math.sin(3 * phase)) + 0.004 * rnd.nextGaussian() * phrase;
+                    }
+                    case 1 -> {
+                        double k = t % 0.5, sn = (t + 0.5) % 1.0;
+                        v = 0.32 * Math.exp(-k * 30) * Math.sin(2 * Math.PI * (55 + 60 * Math.exp(-k * 40)) * k)
+                            + (sn < 0.12 ? 0.16 * Math.exp(-sn * 35) * rnd.nextGaussian() : 0);
+                    }
+                    case 2 -> {
+                        double f = (t % 4) < 2 ? 55 : 73.4;
+                        v = 0.22 * Math.sin(2 * Math.PI * f * t) + 0.05 * Math.sin(4 * Math.PI * f * t);
+                    }
+                    default -> v = 0.06 * (Math.sin(2 * Math.PI * 261.6 * t) + Math.sin(2 * Math.PI * 329.6 * t) + Math.sin(2 * Math.PI * 392 * t)) + 0.006 * rnd.nextGaussian();
+                }
+                double pan = p == 3 ? 0.15 * Math.sin(2 * Math.PI * 0.2 * t) : 0;
+                a.l[i] = (float) (v * (1 - pan));
+                a.r[i] = (float) (v * (1 + pan));
+            }
+            out[p] = new File(dir, title + " - " + parts[p] + ".wav");
+            com.dennis.masterroom.engine.Wav.write(out[p], a, 24);
+        }
+        return out;
+    }
+
     /** target + a tilt (dB per band above 1 kHz), a low-end lift (dB below 150 Hz) and a gentle ripple. */
     private static double[] shape(double[] target, double tiltPerBand, double lowLift, double ripple) {
         double[] out = new double[31];

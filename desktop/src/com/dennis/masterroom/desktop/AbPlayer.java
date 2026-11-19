@@ -58,6 +58,8 @@ final class AbPlayer {
     }
 
     final AbMixer mix = new AbMixer();
+    /** What plays: the takes, or the stems while balancing them. */
+    private volatile Feed feed = mix;
     private volatile boolean playing, closed;
     private Thread thread;
     private SourceDataLine line;
@@ -66,6 +68,11 @@ final class AbPlayer {
     private String problem;
 
     void onStop(Runnable r) { onStop = r; }
+
+    Feed feed() { return feed; }
+
+    /** Switches what plays (pauses first). */
+    void use(Feed f) { pause(); feed = f == null ? mix : f; }
 
     /** Fills out with the block being heard now. False when nothing is playing (or nothing heard yet). */
     boolean now(Moment out) {
@@ -84,9 +91,10 @@ final class AbPlayer {
     String problem() { return problem; }
 
     synchronized void play() {
-        if (playing || mix.size() == 0 || closed) return;
+        Feed f = feed;
+        if (playing || !f.ready() || closed) return;
         try {
-            if (line == null || (int) line.getFormat().getSampleRate() != mix.rate()) open(mix.rate());
+            if (line == null || (int) line.getFormat().getSampleRate() != f.rate()) open(f.rate());
         } catch (LineUnavailableException | IllegalArgumentException e) {
             problem = "No audio output available: " + e.getMessage();
             return;
@@ -104,7 +112,7 @@ final class AbPlayer {
             line.stop();
             int queued = (line.getBufferSize() - line.available()) / line.getFormat().getFrameSize();
             line.flush();
-            mix.rewind(Math.max(0, queued));
+            feed.rewind(Math.max(0, queued));
             synchronized (kept) { written = line.getLongFramePosition(); keptCount = 0; }
             if (analyser != null) analyser.reset();
         }
@@ -147,7 +155,7 @@ final class AbPlayer {
         try {
             while (!closed) {
                 if (!playing) { Thread.sleep(15); continue; }
-                boolean more = mix.next(out);
+                boolean more = feed.next(out);
                 SourceDataLine l;
                 int bps;
                 Analyser an;

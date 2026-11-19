@@ -12,6 +12,7 @@ import java.util.*;
  *  2. Each take meets its loudness and true-peak ceiling.
  *  3. Inputs: MP3 (engine decoder) and, when FFmpeg is present, FLAC (lossless round trip).
  *  4. The A/B player: level matching, crossfades, playback exactness, blind test (PlayerCheck).
+ *  5. Stems: placing by name, the live stem player, mastering from stems = the phone's engine sequence (StemCheck).
  * Usage: java -cp <classes>:desktop/check DesktopCheck [seconds] [copy-of-test-song.wav]
  */
 public final class DesktopCheck {
@@ -91,6 +92,9 @@ public final class DesktopCheck {
 
         // 4. Build 2: the comparison player on this round.
         fails += com.dennis.masterroom.desktop.PlayerCheck.run(app);
+
+        // 5. Build 4: stems (placing, live player, mastering parity with the phone's sequence).
+        fails += com.dennis.masterroom.desktop.StemCheck.run(a.length > 2 ? new File(a[2]) : null);
 
         System.out.printf(Locale.US, "Mastered %d s of audio in %.1f s%n", seconds, app.seconds);
         if (fails > 0) { System.out.println(fails + " desktop check(s) failed"); System.exit(1); }
