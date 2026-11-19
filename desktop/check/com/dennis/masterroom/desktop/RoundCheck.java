@@ -143,7 +143,10 @@ public final class RoundCheck {
         ok(ok[1], String.format(java.util.Locale.US, "and the stems that were open, with the balance set by hand (Bass %+.1f dB)", left[0][2]));
         ok(ok[2], "a muted stem is still muted");
         // Stems gone from where they were: nothing is brought back, nothing breaks.
-        for (File f : four) Files.delete(f.toPath());
+        // (The open windows still hold the files on Windows, so the saved list points somewhere they no longer are.)
+        StringBuilder moved = new StringBuilder();
+        for (File f : four) moved.append(moved.length() == 0 ? "" : "\n").append(new File(f.getParentFile(), "moved/" + f.getName()).getAbsolutePath());
+        MainWindow.PREFS.put("stems.files", moved.toString());
         MainWindow[] m3 = new MainWindow[1];
         javax.swing.SwingUtilities.invokeAndWait(() -> { m3[0] = new MainWindow(); m3[0].restoreStems(); ok[3] = m3[0].stems == null; });
         ok(ok[3], "stems that have been moved or deleted are not brought back");
