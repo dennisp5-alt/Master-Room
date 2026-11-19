@@ -70,6 +70,17 @@ public final class Ffmpeg {
         }
     }
 
+    /** The same, converted to the given sample rate (for a master to compare against a song at another rate). */
+    public static Audio decode(File in, int rate) throws IOException {
+        File wav = File.createTempFile("masterroom-in", ".wav");
+        try {
+            run(List.of("-i", in.getAbsolutePath(), "-vn", "-ac", "2", "-ar", String.valueOf(rate), "-c:a", "pcm_s24le", wav.getAbsolutePath()));
+            return Wav.read(wav);
+        } finally {
+            wav.delete();
+        }
+    }
+
     /** The streaming check's AAC line, as on the phone: AAC-LC at 256 kbps, then decoded again. */
     public static final class Aac implements Streaming.Codec {
         @Override public String name() { return "AAC 256"; }

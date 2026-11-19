@@ -46,6 +46,19 @@ final class Demo {
         return o;
     }
 
+    /** A sample imported master (Stem Lab on the phone), for the screenshot of a round with extras. */
+    static MasterJob.Take imported() {
+        MasterJob.Outcome o = outcome();
+        MasterJob.Take t = o.takes.get(1);
+        t.kind = "imported";
+        t.label = "Dusty Road (Stem Lab)";
+        t.about = "Imported master: Dusty Road (Stem Lab).wav";
+        t.lufs = -11.6; t.truePeak = -0.9; t.ceiling = Double.NaN;
+        t.verdict = "Imported to compare";
+        t.streaming = "Measured here: -11.6 LUFS, -0.9 dBTP";
+        return t;
+    }
+
     /**
      * Four synthetic stems (sung tone with phrases and vibrato, kick and snare, bass, chord pad) for
      * screenshots and checks, so no real song is ever needed or committed.

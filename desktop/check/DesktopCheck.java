@@ -21,6 +21,8 @@ public final class DesktopCheck {
     static void ok(boolean c, String m) { if (!c) fails++; System.out.println((c ? "PASS " : "FAIL ") + m); }
 
     public static void main(String[] a) throws Exception {
+        // The checks keep the app's places and last session in their own preferences, never the real ones.
+        System.setProperty("masterroom.prefs", "/com/dennis/masterroom/check");
         int seconds = a.length > 0 ? Integer.parseInt(a[0]) : 40, rate = 48000, n = seconds * rate;
         File work = Files.createTempDirectory("desktopcheck").toFile();
         Audio song = new Audio(n, rate);
@@ -96,6 +98,9 @@ public final class DesktopCheck {
 
         // 6. Build 5: reference records, album match, Save take, the Yours take.
         fails += com.dennis.masterroom.desktop.LibraryCheck.run(app);
+
+        // 7. Build 6: rounds kept and brought back, the round before kept, a master imported to compare.
+        fails += com.dennis.masterroom.desktop.RoundCheck.run(app);
 
         // 5. Build 4: stems (placing, live player, mastering parity with the phone's sequence).
         fails += com.dennis.masterroom.desktop.StemCheck.run(a.length > 2 ? new File(a[2]) : null);
