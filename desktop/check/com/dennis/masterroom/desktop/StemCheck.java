@@ -60,7 +60,7 @@ public final class StemCheck {
         // Live player at flat gains = the engine's stem sum.
         Stems.Set set = fromWavs.set;
         Audio sum = Stems.mix(set, null, null);
-        StemMixer mix = new StemMixer(set);
+        StemMixer mix = new StemMixer(fromWavs);
         float[] out = new float[AbMixer.BLOCK * 2];
         double worst = 0;
         int p = 0;
@@ -74,7 +74,7 @@ public final class StemCheck {
         // Mute the vocals: one eased block, then exactly the sum without them.
         boolean[] noVocal = new boolean[Stems.COUNT]; noVocal[Stems.VOCALS] = true;
         Audio without = Stems.mix(set, null, noVocal);
-        float[] g = new float[Stems.COUNT]; Arrays.fill(g, 1f); g[Stems.VOCALS] = 0f;
+        float[] g = new float[fromWavs.tracks.size()]; Arrays.fill(g, 1f); g[0] = 0f;
         mix.seek(0.25);
         long at = mix.position();
         mix.setGains(g, null);
@@ -193,7 +193,8 @@ public final class StemCheck {
             "6 Percussion.wav", "7 Strings.wav", "8 Synth.wav", "9 Brass.wav", "10 Woodwinds.wav"};
         Audio[] pa = {v, backing, d, b, o, synth, perc, fx, synth, fx, o};
         List<File> pf = new ArrayList<>();
-        for (int i = 0; i < pn.length; i++) { File f = new File(porch, pn[i]); StemFiles.writeFloat(f, pa[i]); pf.add(f); }
+        // 16-bit like Suno's files (Wav.write), so single stems stay 16-bit and combined ones become float.
+        for (int i = 0; i < pn.length; i++) { File f = new File(porch, pn[i]); Wav.write(f, pa[i], 16); pf.add(f); pa[i] = Wav.read(f); }
         File pz = new File(dir, "The Porch Light's On for Me Stems.zip");
         zeroSizeZip(pz, pf);
         StemFiles.Loaded pl = StemFiles.load(List.of(pz));
@@ -211,6 +212,47 @@ public final class StemCheck {
             vsAll = Math.max(vsAll, Math.abs(all.l[i] - want));
         }
         ok(vsAll < 1e-5, String.format(Locale.US, "every one of the eleven files is in the mix once (worst %.1e)", vsAll));
+        StemMixer live = new StemMixer(pl);
+        float[] blk = new float[AbMixer.BLOCK * 2];
+        double liveWorst = 0;
+        int q = 0;
+        boolean go = true;
+        while (go) {
+            go = live.next(blk);
+            for (int i = 0; i < AbMixer.BLOCK && q < pl.set.frames; i++, q++) liveWorst = Math.max(liveWorst, Math.abs(blk[2 * i] - all.l[q]) + Math.abs(blk[2 * i + 1] - all.r[q]));
+        }
+        live.close();
+        ok(q == pl.set.frames && liveWorst < 1e-6, String.format(Locale.US, "the live stem player plays all eleven files, each on its own (worst %.1e)", liveWorst));
+        ok(pl.tracks.size() == 11 && pl.tracks.get(0).label.equals("Lead Vocals") && pl.tracks.get(1).label.equals("Backing Vocals"),
+            "eleven files, eleven rows, in stem order: " + pl.tracks.get(0).label + ", " + pl.tracks.get(1).label + ", " + pl.tracks.get(2).label + "…");
+
+        // Set by hand, file by file: Brass down 6 dB, Woodwinds muted, both Drums files muted.
+        MasterJob.Settings hand = new MasterJob.Settings();
+        hand.use(pl); hand.stemAuto = false;
+        hand.trackDb = new double[11]; hand.trackMute = new boolean[11];
+        int brass = -1, wood = -1;
+        for (int t = 0; t < 11; t++) {
+            String lab = pl.tracks.get(t).label;
+            if (lab.equals("Brass")) { hand.trackDb[t] = -6; brass = t; }
+            if (lab.equals("Woodwinds")) { hand.trackMute[t] = true; wood = t; }
+            if (pl.tracks.get(t).part == Stems.DRUMS) hand.trackMute[t] = true;
+        }
+        File work = new File(dir, "work");
+        work.mkdirs();
+        MasterJob.Parts parts = MasterJob.parts(hand, work);
+        Audio other = Wav.read(parts.set.files[Stems.OTHER]);
+        float gb = (float) Math.pow(10, -6 / 20.0);
+        double otherWorst = 0;
+        for (int i = 0; i < n; i++) {
+            float want = 0f + pa[7].l[i] + pa[8].l[i] + pa[9].l[i] * gb;
+            otherWorst = Math.max(otherWorst, Math.abs(other.l[i] - want));
+        }
+        ok(brass >= 0 && wood >= 0 && otherWorst < 1e-6 && parts.levels[Stems.OTHER] == 0 && !parts.mute[Stems.OTHER],
+            String.format(Locale.US, "by hand: Other = Strings + Synth + Brass at -6 dB, Woodwinds left out (worst %.1e)", otherWorst));
+        ok(parts.mute[Stems.DRUMS] && !parts.mute[Stems.VOCALS] && parts.set.files[Stems.VOCALS].equals(pl.set.files[Stems.VOCALS]),
+            "both drum files muted mutes the Drums stem; untouched stems stay as loaded");
+        ok(parts.note != null && parts.note.contains("Brass -6.0 dB") && parts.note.contains("Woodwinds muted"), "the sheet lists the files set one by one: " + parts.note);
+        for (File f : parts.made) f.delete();
         pl.discard();
         StemFiles.Loaded folder = StemFiles.load(pf);
         ok(folder.title.equals("porch") && folder.count() == 6, "picked from an unzipped folder: the folder names it (\"" + folder.title + "\")");

@@ -84,4 +84,8 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   a core stem a set lacks is stood in for by silence (never given a level). All of it is listed on the session sheet.
 - **Build 4.2:** Suno downloads that start with a stem (`0 Lead Vocals.wav`, no full mix) keep it: only a number-0 file
   that names no stem is taken for the full mix. Numbered sets take the title from the ZIP or folder name.
+- **Build 4.3, every file its own row:** Stem Studio's 4 to 6 stems and Suno's up to 12 each get a row with solo, mute
+  and a level (more than six in two columns), and the live player plays each file on its own. The auto balance still
+  decides per engine stem (Vocals, Drums, Bass, Other…) and every file of that stem shows the level it got. Set by
+  hand, a stem made of several files is the unmuted files added at their own levels; the sheet lists them.
 - Next builds: references and settings, polish and an icon.

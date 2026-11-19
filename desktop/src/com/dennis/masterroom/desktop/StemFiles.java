@@ -51,8 +51,19 @@ final class StemFiles {
         {"keyboard", "organ", "rhodes"}};
     private static final Pattern NUMBERED = Pattern.compile("^\\d+[\\s_.-]+.*");
 
+    /** One file as it came (Suno's "Brass", Stem Studio's "Vocals"), and the engine stem it belongs to. */
+    static final class Track {
+        final String label;
+        final File file;
+        final int part;
+        final Wav.Header header;
+        Track(String label, File file, int part) throws IOException { this.label = label; this.file = file; this.part = part; header = Wav.header(file); }
+    }
+
     static final class Loaded {
         final Stems.Set set;
+        /** Every file with sound, in stem order (Vocals first), each with its own row, level, solo and mute. */
+        final List<Track> tracks;
         final String title;
         /** What went into each stem, in words ("Vocals + Backing Vocals"); null where there is none. */
         final String[] labels;
@@ -62,8 +73,8 @@ final class StemFiles {
         final List<String> notes;
         /** Unpacked or made files, deleted on {@link #discard()}; null when the picked WAVs are used as they are. */
         final File temp;
-        Loaded(Stems.Set set, String title, String[] labels, boolean[] silent, List<String> notes, File temp) {
-            this.set = set; this.title = title; this.labels = labels; this.silent = silent; this.notes = notes; this.temp = temp;
+        Loaded(Stems.Set set, List<Track> tracks, String title, String[] labels, boolean[] silent, List<String> notes, File temp) {
+            this.set = set; this.tracks = tracks; this.title = title; this.labels = labels; this.silent = silent; this.notes = notes; this.temp = temp;
         }
         /** Stems with sound in them. */
         int count() { int n = 0; for (int i = 0; i < Stems.COUNT; i++) if (set.has(i) && !silent[i]) n++; return n; }
@@ -152,6 +163,12 @@ final class StemFiles {
             File[] files = new File[Stems.COUNT];
             String[] labels = new String[Stems.COUNT];
             Wav.Header first = null;
+            List<Track> tracks = new ArrayList<>();
+            for (int part = 0; part < Stems.COUNT; part++) {
+                List<Item> list = parts.get(part);
+                if (list == null) continue;
+                for (Item it : list) tracks.add(new Track(label(it.name(), title), it.file(), part));
+            }
             for (Map.Entry<Integer, List<Item>> e : parts.entrySet()) {
                 int part = e.getKey();
                 List<Item> list = e.getValue();
@@ -178,7 +195,7 @@ final class StemFiles {
                 notes.add("No " + Stems.NAMES[part] + " stem in this set, so silence stands in for it");
             }
             Stems.Set set = Stems.open(files);
-            return new Loaded(set, title, labels, silent, notes, temp);
+            return new Loaded(set, tracks, title, labels, silent, notes, temp);
         } catch (IOException | RuntimeException e) {
             if (temp != null) deleteAll(temp);
             throw e;

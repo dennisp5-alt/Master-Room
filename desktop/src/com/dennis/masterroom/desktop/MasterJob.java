@@ -47,7 +47,11 @@ public final class MasterJob {
         public boolean[] stemSilent = new boolean[Stems.COUNT];
         /** How the set was made (full mix left out, files combined, silent stand-ins), for the session sheet. */
         public List<String> stemPrep = new ArrayList<>();
-        public void use(StemFiles.Loaded l) { stems = l.set; stemTitle = l.title; stemSilent = l.silent.clone(); stemPrep = new ArrayList<>(l.notes); }
+        /** Every file of the set, and a level and mute for each when adjusting by hand (Suno's stems one by one). */
+        public List<StemFiles.Track> stemTracks;
+        public double[] trackDb;
+        public boolean[] trackMute;
+        public void use(StemFiles.Loaded l) { stems = l.set; stemTitle = l.title; stemSilent = l.silent.clone(); stemPrep = new ArrayList<>(l.notes); stemTracks = l.tracks; }
         public int stemCount() { int n = 0; if (stems != null) for (int i = 0; i < Stems.COUNT; i++) if (stems.has(i)) n++; return n; }
     }
 
@@ -131,6 +135,60 @@ public final class MasterJob {
         return Ffmpeg.decode(f);
     }
 
+    /** The engine's six stems made from the files as set by hand: what the engine is given to treat and balance. */
+    static final class Parts {
+        Stems.Set set;
+        final double[] levels = new double[Stems.COUNT];
+        final boolean[] mute = new boolean[Stems.COUNT];
+        final List<File> made = new ArrayList<>();
+        String note;
+    }
+
+    /**
+     * Folds the per-file levels and mutes into the engine's stems. A stem made of one file keeps that file and
+     * its level. A stem made of several (Suno's Strings, Synth, Brass…) gets the loudest unmuted file's level,
+     * and its file is the unmuted files added at their levels relative to that one (32-bit float); left alone,
+     * it is the stem as loaded. Everything muted mutes the stem.
+     */
+    static Parts parts(Settings s, File work) throws IOException {
+        Parts p = new Parts();
+        File[] files = s.stems.files.clone();
+        List<String> byFile = new ArrayList<>();
+        List<StemFiles.Track> tracks = s.stemTracks;
+        for (int part = 0; part < Stems.COUNT; part++) {
+            List<Integer> all = new ArrayList<>(), on = new ArrayList<>();
+            for (int t = 0; t < tracks.size(); t++) if (tracks.get(t).part == part) { all.add(t); if (!s.trackMute[t]) on.add(t); }
+            if (all.isEmpty()) continue;
+            if (on.isEmpty()) { p.mute[part] = true; continue; }
+            double top = -Double.MAX_VALUE;
+            for (int t : on) top = Math.max(top, s.trackDb[t]);
+            p.levels[part] = top;
+            if (all.size() == 1) { files[part] = tracks.get(all.get(0)).file; continue; }
+            boolean flat = on.size() == all.size();
+            for (int t : on) flat &= Math.abs(s.trackDb[t] - top) < 1e-9;
+            if (flat) continue;
+            Audio sum = null;
+            for (int t : on) {
+                Audio a = Wav.read(tracks.get(t).file);
+                if (sum == null) sum = new Audio(a.frames(), a.rate);
+                float g = (float) Math.pow(10, (s.trackDb[t] - top) / 20);
+                int n = Math.min(a.frames(), sum.frames());
+                for (int i = 0; i < n; i++) { sum.l[i] += a.l[i] * g; sum.r[i] += a.r[i] * g; }
+            }
+            File f = new File(work, "stem-" + part + "-by-file.wav");
+            StemFiles.writeFloat(f, sum);
+            files[part] = f;
+            p.made.add(f);
+            for (int t : all) {
+                StemFiles.Track tr = tracks.get(t);
+                byFile.add(s.trackMute[t] ? tr.label + " muted" : String.format(Locale.US, "%s %+.1f dB", tr.label, s.trackDb[t]));
+            }
+        }
+        p.set = Stems.open(files);
+        if (!byFile.isEmpty()) p.note = "Stem files set one by one: " + String.join(", ", byFile);
+        return p;
+    }
+
     /** The engine's auto balance, with any silent stand-in left at 0 dB (there is nothing there to move). */
     static Stems.Balance balanced(Stems.Reading reading, Target.Style style, boolean[] silent) {
         Stems.Balance b = Stems.decide(reading, style);
@@ -184,16 +242,28 @@ public final class MasterJob {
         if (s.stems != null) {
             asItCame = Listen.to(in);
             in = null;
+            Stems.Set set = s.stems;
             double[] levels = s.stemDb;
+            boolean[] mute = s.stemMute;
             float[] rides = s.stemRide;
+            List<File> made = new ArrayList<>();
             for (String note : s.stemPrep) options.stemNotes.add("Stems: " + note);
-            if (s.stemAuto) {
-                Stems.Balance balance = balanced(s.stemReading != null ? s.stemReading : Stems.read(s.stems), s.style, s.stemSilent);
-                levels = balance.levelDb;
-                rides = balance.rideDb;
-                options.stemNotes.add("Auto balance: " + balance.words());
+            try {
+                if (s.stemAuto) {
+                    Stems.Balance balance = balanced(s.stemReading != null ? s.stemReading : Stems.read(s.stems), s.style, s.stemSilent);
+                    levels = balance.levelDb;
+                    rides = balance.rideDb;
+                    mute = new boolean[Stems.COUNT];
+                    options.stemNotes.add("Auto balance: " + balance.words());
+                } else if (s.stemTracks != null && s.trackDb != null) {
+                    Parts p = parts(s, dir);
+                    set = p.set; levels = p.levels; mute = p.mute; made = p.made;
+                    if (p.note != null) options.stemNotes.add(p.note);
+                }
+                in = Stems.render(set, levels, rides, mute, options.cleanUp, dir, options.stemNotes, bar);
+            } finally {
+                for (File f : made) f.delete();
             }
-            in = Stems.render(s.stems, levels, rides, s.stemMute, options.cleanUp, dir, options.stemNotes, bar);
             out.stemNotes.addAll(options.stemNotes);
         }
         Audio[] holder = {in};

@@ -6,34 +6,40 @@ import com.dennis.masterroom.engine.Wav;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Plays the stems live from their files, as the phone's StemPlayer does, so the balance is heard as it
- * changes: a gain per stem (eased over one block), the vocal rides, mutes and solos. Playback only;
- * nothing is written.
+ * changes. One gain per file (eased over one block), so each of Suno's stems can be set on its own; the
+ * vocal rides go on every file of the Vocals stem. Playback only; nothing is written.
  */
 final class StemMixer implements Feed {
     final Stems.Set set;
-    private final RandomAccessFile[] in = new RandomAccessFile[Stems.COUNT];
-    private final byte[][] raw = new byte[Stems.COUNT][];
+    private final List<StemFiles.Track> tracks;
+    private final RandomAccessFile[] in;
+    private final byte[][] raw;
     private final float[] l = new float[AbMixer.BLOCK], r = new float[AbMixer.BLOCK];
-    private final float[] now = new float[Stems.COUNT];
-    private volatile float[] wanted = new float[Stems.COUNT];
+    private final float[] now;
+    private volatile float[] wanted;
     private volatile float[] ride;
     private long position;
 
-    StemMixer(Stems.Set set) throws IOException {
-        this.set = set;
-        for (int s = 0; s < Stems.COUNT; s++) {
-            if (!set.has(s)) continue;
-            in[s] = new RandomAccessFile(set.files[s], "r");
-            raw[s] = new byte[AbMixer.BLOCK * set.headers[s].frameBytes()];
+    StemMixer(StemFiles.Loaded loaded) throws IOException {
+        set = loaded.set;
+        tracks = loaded.tracks;
+        int n = tracks.size();
+        in = new RandomAccessFile[n];
+        raw = new byte[n][];
+        for (int t = 0; t < n; t++) {
+            in[t] = new RandomAccessFile(tracks.get(t).file, "r");
+            raw[t] = new byte[AbMixer.BLOCK * tracks.get(t).header.frameBytes()];
         }
+        wanted = new float[n];
         Arrays.fill(wanted, 1f);
-        System.arraycopy(wanted, 0, now, 0, now.length);
+        now = wanted.clone();
     }
 
-    /** Linear gain per stem (0 for silent), and the vocal rides (dB every tenth of a second, may be null). */
+    /** Linear gain per file (0 for silent), and the vocal rides (dB every tenth of a second, may be null). */
     void setGains(float[] gains, float[] rideDb) { wanted = gains.clone(); ride = rideDb; }
 
     @Override public synchronized boolean next(float[] out) throws IOException {
@@ -42,19 +48,22 @@ final class StemMixer implements Feed {
         if (n <= 0) { position = 0; return false; }
         float[] aim = wanted;
         float lift = Stems.rideGain(ride, position, set.rate);
-        for (int s = 0; s < Stems.COUNT; s++) {
-            if (in[s] == null) continue;
-            Wav.Header h = set.headers[s];
-            in[s].seek(h.dataStart + position * (long) h.frameBytes());
-            in[s].readFully(raw[s], 0, n * h.frameBytes());
-            Wav.decode(h, raw[s], n, l, r);
-            float end = aim[s] * (s == Stems.VOCALS ? lift : 1), gain = now[s], step = (end - gain) / n;
+        for (int t = 0; t < in.length; t++) {
+            if (in[t] == null) continue;
+            StemFiles.Track track = tracks.get(t);
+            Wav.Header h = track.header;
+            int have = (int) Math.max(0, Math.min(n, h.frames - position));
+            float end = aim[t] * (track.part == Stems.VOCALS ? lift : 1), gain = now[t], step = have == 0 ? 0 : (end - gain) / have;
+            now[t] = end;
+            if (have == 0 || (gain == 0 && end == 0)) continue;
+            in[t].seek(h.dataStart + position * (long) h.frameBytes());
+            in[t].readFully(raw[t], 0, have * h.frameBytes());
+            Wav.decode(h, raw[t], have, l, r);
             if (step == 0) {
-                for (int i = 0; i < n; i++) { out[2 * i] += l[i] * gain; out[2 * i + 1] += r[i] * gain; }
+                for (int i = 0; i < have; i++) { out[2 * i] += l[i] * gain; out[2 * i + 1] += r[i] * gain; }
             } else {
-                for (int i = 0; i < n; i++, gain += step) { out[2 * i] += l[i] * gain; out[2 * i + 1] += r[i] * gain; }
+                for (int i = 0; i < have; i++, gain += step) { out[2 * i] += l[i] * gain; out[2 * i + 1] += r[i] * gain; }
             }
-            now[s] = end;
         }
         position += n;
         if (position >= set.frames) { position = 0; return false; }

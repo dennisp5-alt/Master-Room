@@ -89,8 +89,9 @@ final class MainWindow {
     private Stems.Reading stemReading;
     private Stems.Balance stemAuto;
     private boolean stemManual, onStems;
-    private final double[] stemDb = new double[Stems.COUNT];
-    private final boolean[] stemMute = new boolean[Stems.COUNT], stemSolo = new boolean[Stems.COUNT];
+    /** Per file of the set (Suno's stems one by one): level, mute (also in the master) and solo (listening only). */
+    private double[] stemDb = new double[0];
+    private boolean[] stemMute = new boolean[0], stemSolo = new boolean[0];
     private float[] stemRide;
     private Listen stemListen;
     private float[] stemPeaks;
@@ -204,7 +205,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 4.2 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 4.3 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -396,7 +397,7 @@ final class MainWindow {
         s.outRoot = outRoot;
         if (stems != null) {
             s.use(stems); s.stemAuto = !stemManual;
-            s.stemDb = stemDb.clone(); s.stemMute = stemMute.clone(); s.stemRide = stemRide; s.stemReading = stemReading;
+            s.trackDb = stemDb.clone(); s.trackMute = stemMute.clone(); s.stemRide = stemRide; s.stemReading = stemReading;
         }
         player.use(null);
         stopListening();
@@ -706,10 +707,11 @@ final class MainWindow {
         stems = loaded; stemListen = listen; stemPeaks = peaks; stemReading = reading;
         song = null;
         stemManual = false;
-        java.util.Arrays.fill(stemSolo, false);
-        stemMix = new StemMixer(stems.set);
+        int n = stems.tracks.size();
+        stemDb = new double[n]; stemMute = new boolean[n]; stemSolo = new boolean[n];
+        stemMix = new StemMixer(stems);
         applyAuto();
-        songName.setText(stems.title + "  (" + stems.count() + " stems)");
+        songName.setText(stems.title + "  (" + stems.tracks.size() + " stems)");
         songFacts.setText(String.format(Locale.US, "As it came in (stems summed): %.1f LUFS, %.1f LU range, %.1f dBTP true peak",
             stemListen.loudness.integrated, stemListen.loudness.lra, stemListen.truePeakDb));
         benchSwitch.setVisible(true);
@@ -746,26 +748,29 @@ final class MainWindow {
         refreshConsole();
     }
 
-    /** The phone's rule: the app's own balance unless Dennis has taken over. */
+    /**
+     * The phone's rule: the app's own balance unless Dennis has taken over. The engine decides a level per stem
+     * (Vocals, Drums, Bass, Other…); every file of that stem shows it, so Suno's files can then be set one by one.
+     */
     private void applyAuto() {
         if (stems == null) return;
         if (!stemManual && stemReading != null) {
             stemAuto = MasterJob.balanced(stemReading, (Target.Style) style.getSelectedItem(), stems.silent);
-            System.arraycopy(stemAuto.levelDb, 0, stemDb, 0, Stems.COUNT);
+            for (int t = 0; t < stemDb.length; t++) stemDb[t] = stemAuto.levelDb[stems.tracks.get(t).part];
             java.util.Arrays.fill(stemMute, false);
             stemRide = stemAuto.rideDb;
         }
         stemsChanged();
     }
 
-    /** What the stems play at now. A solo silences the rest, but only while listening. */
+    /** What each file plays at now. A solo silences the rest, but only while listening. */
     private float[] stemGains() {
         boolean solo = false;
         for (boolean x : stemSolo) solo |= x;
-        float[] g = new float[Stems.COUNT];
-        for (int i = 0; i < Stems.COUNT; i++) {
-            boolean heard = solo ? stemSolo[i] : !stemMute[i];
-            g[i] = heard ? (float) Math.pow(10, stemDb[i] / 20) : 0f;
+        float[] g = new float[stemDb.length];
+        for (int t = 0; t < g.length; t++) {
+            boolean heard = solo ? stemSolo[t] : !stemMute[t];
+            g[t] = heard ? (float) Math.pow(10, stemDb[t] / 20) : 0f;
         }
         return g;
     }
@@ -775,21 +780,23 @@ final class MainWindow {
         stemsView.draw();
     }
 
-    private void stemNudge(int part, double db) {
+    private void stemNudge(int t, double db) {
         stemManual = true;
-        stemDb[part] = Math.max(-Stems.REACH_DB, Math.min(Stems.REACH_DB, Math.round((stemDb[part] + db) * 2) / 2.0));
+        stemDb[t] = Math.max(-Stems.REACH_DB, Math.min(Stems.REACH_DB, Math.round((stemDb[t] + db) * 2) / 2.0));
         stemsChanged();
     }
 
-    /** The stem balance: one row per stem with solo, mute and level, and the auto balance in words. */
+    /**
+     * The stem balance: one row per file with solo, mute and level, and the auto balance in words. Up to six
+     * files in one column (Stem Studio); more (Suno's up to twelve) in two.
+     */
     final class StemsView extends JPanel {
         private final JLabel summary = text(" ", Look.size(Look.body, 13), Look.MID);
         private final JButton auto = button("Back to auto", false);
-        private final JPanel lines = column();
-        private final JLabel note = text("<html>Solo is for listening only. Mute also leaves the stem out of the master. Vocals and other instruments are cleaned on their own; drums and bass are left as they are.</html>",
-            Look.size(Look.body, 12), Look.DIM);
-        private final JLabel[] names = new JLabel[Stems.COUNT], values = new JLabel[Stems.COUNT];
-        private final JButton[] solos = new JButton[Stems.COUNT], mutes = new JButton[Stems.COUNT], downs = new JButton[Stems.COUNT], ups = new JButton[Stems.COUNT];
+        private final JPanel lines = new JPanel();
+        private final JLabel note = text(" ", Look.size(Look.body, 12), Look.DIM);
+        private JLabel[] names = new JLabel[0], values = new JLabel[0];
+        private JButton[] solos = new JButton[0], mutes = new JButton[0], downs = new JButton[0], ups = new JButton[0];
 
         StemsView() {
             super(new BorderLayout());
@@ -805,7 +812,8 @@ final class MainWindow {
             auto.addActionListener(e -> { stemManual = false; java.util.Arrays.fill(stemSolo, false); applyAuto(); });
             top.add(auto);
             add(top, BorderLayout.NORTH);
-            lines.setBorder(new EmptyBorder(8, 0, 6, 0));
+            lines.setOpaque(false);
+            lines.setBorder(new EmptyBorder(8, 0, 4, 0));
             add(lines, BorderLayout.CENTER);
             add(note, BorderLayout.SOUTH);
         }
@@ -818,41 +826,57 @@ final class MainWindow {
 
         void rebuild() {
             lines.removeAll();
-            if (stems != null) {
-                int count = stems.count(), height = count > 5 ? 28 : count > 4 ? 32 : 38;
-                for (int part = 0; part < Stems.COUNT; part++) if (stems.set.has(part) && !stems.silent[part]) lines.add(line(part, height));
+            int n = stems == null ? 0 : stems.tracks.size();
+            names = new JLabel[n]; values = new JLabel[n];
+            solos = new JButton[n]; mutes = new JButton[n]; downs = new JButton[n]; ups = new JButton[n];
+            boolean two = n > 6;
+            if (two) {
+                int rows = (n + 1) / 2;
+                lines.setLayout(new GridLayout(rows, 2, 22, 0));
+                // GridLayout fills across, so place the first half down the left and the rest down the right.
+                for (int r = 0; r < rows; r++)
+                    for (int c = 0; c < 2; c++) {
+                        int t = c * rows + r;
+                        lines.add(t < n ? line(t, true) : Box.createHorizontalStrut(1));
+                    }
+            } else {
+                lines.setLayout(new GridLayout(Math.max(1, n), 1, 0, 0));
+                for (int t = 0; t < n; t++) lines.add(line(t, false));
             }
+            note.setText(two ? "<html>Solo: listening only. Mute: also out of the master. Each file's stem is shown on the right; the stems are treated and balanced as the phone does.</html>"
+                : "<html>Solo is for listening only. Mute also leaves the stem out of the master. Vocals and other instruments are cleaned on their own; drums and bass are left as they are.</html>");
             lines.revalidate(); lines.repaint();
             draw();
         }
 
-        private JComponent line(int part, int height) {
-            final String name = Stems.NAMES[part];
+        private JComponent line(int t, boolean compact) {
+            StemFiles.Track track = stems.tracks.get(t);
+            String name = track.label;
             JPanel r = row();
-            r.setPreferredSize(new Dimension(600, height)); r.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
-            names[part] = text(name, Look.size(Look.strong, 15), Look.TEXT);
-            fix(names[part], 110);
-            r.add(names[part]);
-            solos[part] = key("S", name + " solo, for listening only", () -> { stemSolo[part] = !stemSolo[part]; stemsChanged(); });
-            mutes[part] = key("M", "Mute " + name + ", also in the master", () -> { stemManual = true; stemMute[part] = !stemMute[part]; stemsChanged(); });
-            downs[part] = key("\u2212", name + " down 0.5 dB", () -> stemNudge(part, -0.5));
-            ups[part] = key("+", name + " up 0.5 dB", () -> stemNudge(part, 0.5));
-            values[part] = text("+0.0 dB", Look.size(Look.mono, 14), Look.AMBER);
-            values[part].setHorizontalAlignment(SwingConstants.CENTER);
-            fix(values[part], 84);
-            values[part].setToolTipText(name + " level. Click to set it back to 0 dB");
-            values[part].setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            values[part].addMouseListener(new MouseAdapter() {
-                @Override public void mousePressed(MouseEvent e) { if (busy) return; stemManual = true; stemDb[part] = 0; stemsChanged(); }
+            names[t] = text(name, Look.size(Look.strong, compact ? 14 : 15), Look.TEXT);
+            names[t].setToolTipText(name + " (" + Stems.NAMES[track.part] + " stem)");
+            fix(names[t], compact ? 118 : 130);
+            r.add(names[t]);
+            solos[t] = key("S", name + " solo, for listening only", compact, () -> { stemSolo[t] = !stemSolo[t]; stemsChanged(); });
+            mutes[t] = key("M", "Mute " + name + ", also in the master", compact, () -> { stemManual = true; stemMute[t] = !stemMute[t]; stemsChanged(); });
+            downs[t] = key("\u2212", name + " down 0.5 dB", compact, () -> stemNudge(t, -0.5));
+            ups[t] = key("+", name + " up 0.5 dB", compact, () -> stemNudge(t, 0.5));
+            values[t] = text("+0.0 dB", Look.size(Look.mono, compact ? 13 : 14), Look.AMBER);
+            values[t].setHorizontalAlignment(SwingConstants.CENTER);
+            fix(values[t], compact ? 70 : 84);
+            values[t].setToolTipText(name + " level. Click to set it back to 0 dB");
+            values[t].setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            values[t].addMouseListener(new MouseAdapter() {
+                @Override public void mousePressed(MouseEvent e) { if (busy) return; stemManual = true; stemDb[t] = 0; stemsChanged(); }
             });
-            r.add(solos[part]); r.add(Box.createHorizontalStrut(4)); r.add(mutes[part]); r.add(Box.createHorizontalStrut(18));
-            r.add(downs[part]); r.add(values[part]); r.add(ups[part]); r.add(Box.createHorizontalStrut(18));
+            r.add(solos[t]); r.add(Box.createHorizontalStrut(4)); r.add(mutes[t]); r.add(Box.createHorizontalStrut(compact ? 10 : 18));
+            r.add(downs[t]); r.add(values[t]); r.add(ups[t]); r.add(Box.createHorizontalStrut(compact ? 10 : 18));
+            int part = track.part;
             String treated = part == Stems.DRUMS || part == Stems.BASS ? "left as it is"
                 : part == Stems.VOCALS ? "cleaned on its own, plus the rides" : "cleaned on its own";
-            String what = stems.labels[part];
-            boolean combined = what != null && what.contains(" + ");
-            JLabel about = text((what != null ? what : Stems.NAMES[part]) + ": " + treated, Look.size(Look.body, 12), combined ? Look.MID : Look.DIM);
-            about.setToolTipText(combined ? "Combined from " + what + ", added together sample for sample" : null);
+            JLabel about = compact ? text(Stems.NAMES[part], Look.size(Look.body, 12), Look.DIM)
+                : text(Stems.NAMES[part] + " stem: " + treated, Look.size(Look.body, 12), Look.DIM);
+            about.setToolTipText(Stems.NAMES[part] + " stem: " + treated);
             r.add(about);
             r.add(Box.createHorizontalGlue());
             return r;
@@ -863,11 +887,11 @@ final class MainWindow {
             c.setPreferredSize(d); c.setMinimumSize(d); c.setMaximumSize(d);
         }
 
-        private JButton key(String label, String tip, Runnable action) {
+        private JButton key(String label, String tip, boolean compact, Runnable action) {
             JButton b = segment(label);
-            b.setFont(Look.size(Look.strong, 14));
+            b.setFont(Look.size(Look.strong, compact ? 13 : 14));
             b.setToolTipText(tip);
-            Dimension d = new Dimension(36, 28);
+            Dimension d = compact ? new Dimension(32, 24) : new Dimension(36, 28);
             b.setPreferredSize(d); b.setMinimumSize(d); b.setMaximumSize(d);
             b.addActionListener(e -> { if (!busy) action.run(); });
             return b;
@@ -877,14 +901,14 @@ final class MainWindow {
             if (stems == null) { summary.setText(" "); auto.setEnabled(false); return; }
             boolean solo = false;
             for (boolean x : stemSolo) solo |= x;
-            for (int part = 0; part < Stems.COUNT; part++) {
-                if (names[part] == null || !stems.set.has(part) || stems.silent[part]) continue;
-                boolean heard = solo ? stemSolo[part] : !stemMute[part];
-                names[part].setForeground(heard ? Look.TEXT : Look.DIM);
-                values[part].setText(String.format(Locale.US, "%+.1f dB", stemDb[part]));
-                values[part].setForeground(stemMute[part] ? Look.DIM : Look.AMBER);
-                solos[part].putClientProperty("on", stemSolo[part]); mutes[part].putClientProperty("on", stemMute[part]);
-                for (JButton b : new JButton[]{solos[part], mutes[part], downs[part], ups[part]}) { b.setEnabled(!busy); b.repaint(); }
+            for (int t = 0; t < names.length && t < stemDb.length; t++) {
+                if (names[t] == null) continue;
+                boolean heard = solo ? stemSolo[t] : !stemMute[t];
+                names[t].setForeground(heard ? Look.TEXT : Look.DIM);
+                values[t].setText(String.format(Locale.US, "%+.1f dB", stemDb[t]));
+                values[t].setForeground(stemMute[t] ? Look.DIM : Look.AMBER);
+                solos[t].putClientProperty("on", stemSolo[t]); mutes[t].putClientProperty("on", stemMute[t]);
+                for (JButton b : new JButton[]{solos[t], mutes[t], downs[t], ups[t]}) { b.setEnabled(!busy); b.repaint(); }
             }
             String words = stemManual ? "Your balance. Small moves work best: each stem holds traces of the others."
                 : stemAuto == null ? "Working out the balance…" : "Auto balance: " + stemAuto.words() + ".";
@@ -1167,11 +1191,31 @@ final class MainWindow {
     }
 
     static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy, boolean blindOn, boolean toneView, boolean stemsOn) throws Exception {
+        screenshot(png, w, h, demo, songLabel, busy, blindOn, toneView, stemsOn, false);
+    }
+
+    static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy, boolean blindOn, boolean toneView, boolean stemsOn, boolean suno) throws Exception {
         MainWindow m = new MainWindow();
         m.showTone(false);
         if (stemsOn) {
             File dir = java.nio.file.Files.createTempDirectory("masterroom-demo-stems").toFile();
-            StemFiles.Loaded l = StemFiles.load(List.of(Demo.writeStems(dir, "Dusty Road", 8)));
+            File[] four = Demo.writeStems(dir, "Dusty Road", 8);
+            List<File> files = List.of(four);
+            if (suno) {
+                // Suno's layout, built from the four sample stems (a picture of the screen only).
+                File sd = new File(dir, "Dusty Road Stems");
+                sd.mkdirs();
+                String[] names = {"0 Lead Vocals", "1 Backing Vocals", "2 Drums", "3 Bass", "4 Guitar", "5 Keyboard", "6 Percussion", "7 Strings", "8 Synth", "9 Brass", "10 Woodwinds"};
+                int[] from = {0, 0, 1, 2, 3, 3, 1, 3, 3, 3, 3};
+                List<File> sf = new java.util.ArrayList<>();
+                for (int i = 0; i < names.length; i++) {
+                    File f = new File(sd, names[i] + ".wav");
+                    java.nio.file.Files.copy(four[from[i]].toPath(), f.toPath());
+                    sf.add(f);
+                }
+                files = sf;
+            }
+            StemFiles.Loaded l = StemFiles.load(files);
             Audio a = Stems.mix(l.set, null, null);
             m.useStems(l, Listen.to(a), Overview.peaks(a, 1600), Stems.read(l.set));
             m.stemSolo[0] = false; m.stemNudge(2, 0.5);
