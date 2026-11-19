@@ -13,7 +13,7 @@ on:
       - '.github/workflows/build-windows.yml'
 
 permissions:
-  contents: read
+  contents: write  # the trial download is published as a GitHub pre-release
 
 env:
   APP_VERSION: '0.6.0'
@@ -119,6 +119,22 @@ jobs:
             --java-options "-Xmx6g" --icon build/desktop/MasterRoom.ico --add-launcher "Master Room CLI"=desktop/cli-launcher.properties \
             --win-per-user-install --win-menu --win-shortcut --win-dir-chooser
           cp build/desktop/msi/*.msi "MasterRoom-Windows-$APP_VERSION.msi"
+
+      - name: Trial download (a GitHub pre-release, so the link works without signing in)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="windows-v$APP_VERSION"
+          FILES=$(ls MasterRoom-Windows-*.zip MasterRoom-Windows-*.msi 2>/dev/null)
+          NOTES="Master Room for Windows $APP_VERSION (trial). Unzip and run Master Room.exe, or use the MSI installer if it is here. Built from ${GITHUB_SHA::7} on $GITHUB_REF_NAME."
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --clobber
+            gh release edit "$TAG" --notes "$NOTES" --prerelease
+          else
+            gh release create "$TAG" $FILES --prerelease --target "$GITHUB_SHA" --title "Master Room for Windows $APP_VERSION (trial)" --notes "$NOTES"
+          fi
+          echo "Download: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
 
       - uses: actions/upload-artifact@v4
         with:
