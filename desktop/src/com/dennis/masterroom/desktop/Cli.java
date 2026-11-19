@@ -34,8 +34,9 @@ final class Cli {
         if (!stems.isEmpty()) {
             try {
                 loaded = StemFiles.load(stems);
-                s.stems = loaded.set; s.stemTitle = loaded.title; s.stemAuto = true;
+                s.use(loaded); s.stemAuto = true;
                 System.out.println("STEMS " + loaded.count() + " " + loaded.title);
+                for (String note : loaded.notes) System.out.println("PREP " + note);
             } catch (Exception e) { System.err.println("FAILED " + e.getMessage()); return 2; }
         } else if (s.song == null || !s.song.isFile()) { System.err.println("No song: --master <file>, or --master --stems <files or zip>"); return 2; }
         try {

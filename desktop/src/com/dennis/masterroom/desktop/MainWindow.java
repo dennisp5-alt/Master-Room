@@ -204,7 +204,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 4 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 4.1 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -395,7 +395,7 @@ final class MainWindow {
         s.commercial = commercial.isSelected(); s.cleanUp = cleanUp.isSelected(); s.mp3 = mp3.isSelected();
         s.outRoot = outRoot;
         if (stems != null) {
-            s.stems = stems.set; s.stemTitle = stems.title; s.stemAuto = !stemManual;
+            s.use(stems); s.stemAuto = !stemManual;
             s.stemDb = stemDb.clone(); s.stemMute = stemMute.clone(); s.stemRide = stemRide; s.stemReading = stemReading;
         }
         player.use(null);
@@ -716,7 +716,9 @@ final class MainWindow {
         stemsView.rebuild();
         showBench(true);
         master.setEnabled(!busy);
-        status.setText("Stems loaded. Listen to the balance, then press Master.");
+        status.setText(stems.notes.isEmpty() ? "Stems loaded. Listen to the balance, then press Master."
+            : "Stems loaded. " + String.join(". ", stems.notes) + ".");
+        status.setToolTipText(String.join("\n", stems.notes));
     }
 
     /** Back to working from a song. A ZIP's unpacked stems are deleted; picked WAVs are left where they are. */
@@ -748,7 +750,7 @@ final class MainWindow {
     private void applyAuto() {
         if (stems == null) return;
         if (!stemManual && stemReading != null) {
-            stemAuto = Stems.decide(stemReading, (Target.Style) style.getSelectedItem());
+            stemAuto = MasterJob.balanced(stemReading, (Target.Style) style.getSelectedItem(), stems.silent);
             System.arraycopy(stemAuto.levelDb, 0, stemDb, 0, Stems.COUNT);
             java.util.Arrays.fill(stemMute, false);
             stemRide = stemAuto.rideDb;
@@ -817,8 +819,8 @@ final class MainWindow {
         void rebuild() {
             lines.removeAll();
             if (stems != null) {
-                int count = stems.count(), height = count > 4 ? 30 : 38;
-                for (int part = 0; part < Stems.COUNT; part++) if (stems.set.has(part)) lines.add(line(part, height));
+                int count = stems.count(), height = count > 5 ? 28 : count > 4 ? 32 : 38;
+                for (int part = 0; part < Stems.COUNT; part++) if (stems.set.has(part) && !stems.silent[part]) lines.add(line(part, height));
             }
             lines.revalidate(); lines.repaint();
             draw();
@@ -845,9 +847,13 @@ final class MainWindow {
             });
             r.add(solos[part]); r.add(Box.createHorizontalStrut(4)); r.add(mutes[part]); r.add(Box.createHorizontalStrut(18));
             r.add(downs[part]); r.add(values[part]); r.add(ups[part]); r.add(Box.createHorizontalStrut(18));
-            String treated = part == Stems.DRUMS || part == Stems.BASS ? "Left as it is, so hits stay as they were"
-                : part == Stems.VOCALS ? "Cleaned on its own: harshness and esses, plus the rides" : "Cleaned on its own: harshness, resonances, top end";
-            r.add(text(treated, Look.size(Look.body, 12), Look.DIM));
+            String treated = part == Stems.DRUMS || part == Stems.BASS ? "left as it is"
+                : part == Stems.VOCALS ? "cleaned on its own, plus the rides" : "cleaned on its own";
+            String what = stems.labels[part];
+            boolean combined = what != null && what.contains(" + ");
+            JLabel about = text((combined ? what : "Stem") + ": " + treated, Look.size(Look.body, 12), combined ? Look.MID : Look.DIM);
+            about.setToolTipText(combined ? "Combined from " + what + ", added together sample for sample" : null);
+            r.add(about);
             r.add(Box.createHorizontalGlue());
             return r;
         }
@@ -872,7 +878,7 @@ final class MainWindow {
             boolean solo = false;
             for (boolean x : stemSolo) solo |= x;
             for (int part = 0; part < Stems.COUNT; part++) {
-                if (names[part] == null || !stems.set.has(part)) continue;
+                if (names[part] == null || !stems.set.has(part) || stems.silent[part]) continue;
                 boolean heard = solo ? stemSolo[part] : !stemMute[part];
                 names[part].setForeground(heard ? Look.TEXT : Look.DIM);
                 values[part].setText(String.format(Locale.US, "%+.1f dB", stemDb[part]));

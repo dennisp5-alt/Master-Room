@@ -50,8 +50,12 @@ public final class StemCheck {
         File unpacked = fromZip.temp;
         fromZip.discard();
         ok(!unpacked.exists(), "the unpacked ZIP is deleted when the stems are cleared");
-        try { StemFiles.load(Arrays.asList(wavs[0], wavs[1], wavs[2])); ok(false, "a missing core stem is refused"); }
-        catch (java.io.IOException e) { ok(e.getMessage().contains("Other"), "a missing core stem is refused: " + e.getMessage()); }
+        StemFiles.Loaded three = StemFiles.load(Arrays.asList(wavs[0], wavs[1], wavs[2]));
+        ok(three.silent[Stems.OTHER] && three.count() == 3 && three.notes.contains("No Other stem in this set, so silence stands in for it"),
+            "a missing core stem is stood in for by silence, said plainly");
+        three.discard();
+        try { StemFiles.load(Arrays.asList(wavs[0], new File(dir, "Check Song - Take 3.wav"))); ok(false, "an unknown file name is refused"); }
+        catch (java.io.IOException e) { ok(e.getMessage().startsWith("Not sure which stem"), "a file that names no stem is refused: " + e.getMessage()); }
 
         // Live player at flat gains = the engine's stem sum.
         Stems.Set set = fromWavs.set;
@@ -119,7 +123,122 @@ public final class StemCheck {
             "the balance is written on the session sheet: " + (app.stemNotes.isEmpty() ? "" : app.stemNotes.get(0)));
         ok(app.settings.contains("from 4 stems, auto balance"), "settings line says it came from stems: " + app.settings);
         ok(app.dir.getParentFile().getName().equals("Check Song"), "the round is filed under the song title from the stems");
+
+        suno(dir, wavs);
         StemFiles.deleteAll(dir);
         return fails;
+    }
+
+    /**
+     * A Suno-style download: numbered files, the full mix as "0 <title>.wav", extra stems (backing vocals,
+     * percussion, FX, synth), 32-bit float, a MIDI file, and a ZIP whose local headers carry sizes of 0
+     * (what stopped the first desktop build: "invalid entry size (expected 0 but got … bytes)").
+     */
+    private static void suno(File dir, File[] wavs) throws Exception {
+        File sd = new File(dir, "suno");
+        sd.mkdirs();
+        Audio v = Wav.read(wavs[0]), d = Wav.read(wavs[1]), b = Wav.read(wavs[2]), o = Wav.read(wavs[3]);
+        int n = v.frames(), rate = v.rate;
+        Audio backing = new Audio(n, rate), perc = new Audio(n, rate), fx = new Audio(n, rate), synth = new Audio(n, rate), full = new Audio(n, rate);
+        java.util.Random rnd = new java.util.Random(4);
+        for (int i = 0; i < n; i++) {
+            double t = i / (double) rate;
+            backing.l[i] = 0.4f * v.l[Math.max(0, i - 2400)]; backing.r[i] = 0.4f * v.r[Math.max(0, i - 2400)];
+            float shaker = (float) (((t * 4) % 1) < 0.05 ? 0.08 * rnd.nextGaussian() : 0);
+            perc.l[i] = shaker; perc.r[i] = shaker * 0.8f;
+            float swoosh = (float) (0.02 * rnd.nextGaussian() * Math.max(0, Math.sin(Math.PI * (t % 5) / 5)));
+            fx.l[i] = swoosh; fx.r[i] = -swoosh;
+            float lead = (float) (0.05 * Math.sin(2 * Math.PI * 523.3 * t) * (((t * 2) % 1) < 0.5 ? 1 : 0));
+            synth.l[i] = lead * 0.7f; synth.r[i] = lead;
+            full.l[i] = v.l[i] + backing.l[i] + d.l[i] + perc.l[i] + b.l[i] + o.l[i] + fx.l[i] + synth.l[i];
+            full.r[i] = v.r[i] + backing.r[i] + d.r[i] + perc.r[i] + b.r[i] + o.r[i] + fx.r[i] + synth.r[i];
+        }
+        String[] names = {"0 Check Song.wav", "1 FX.wav", "2 Synth.wav", "3 Percussion.wav", "4 Bass.wav", "5 Drums.wav", "6 Backing_Vocals.wav", "7 Vocals.wav", "8 Sample.wav"};
+        Audio[] audio = {full, fx, synth, perc, b, d, backing, v, o};
+        List<File> files = new ArrayList<>();
+        for (int i = 0; i < names.length; i++) { File f = new File(sd, names[i]); StemFiles.writeFloat(f, audio[i]); files.add(f); }
+        File midi = new File(sd, "Check Song (Drums).mid");
+        Files.write(midi.toPath(), new byte[]{'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, 96});
+        files.add(midi);
+        File zip = new File(dir, "Check Song Suno.zip");
+        zeroSizeZip(zip, files);
+        try (java.util.zip.ZipInputStream z = new java.util.zip.ZipInputStream(new java.io.FileInputStream(zip))) {
+            byte[] buf = new byte[1 << 16];
+            while (z.getNextEntry() != null) while (z.read(buf) > 0) { }
+            ok(false, "the test ZIP reproduces Suno's layout (a streaming reader should fail on it)");
+        } catch (java.util.zip.ZipException e) {
+            ok(e.getMessage().startsWith("invalid entry size"), "the test ZIP reproduces the error from Suno's ZIP: " + e.getMessage());
+        }
+
+        StemFiles.Loaded l = StemFiles.load(List.of(zip));
+        ok(l.title.equals("Check Song"), "title from Suno's full mix file: \"" + l.title + "\"");
+        ok(l.notes.get(0).startsWith("Left out the full mix (0 Check Song.wav)"), "the full mix is left out: " + l.notes.get(0));
+        ok(l.count() == 4 && "Backing Vocals + Vocals".equals(l.labels[Stems.VOCALS]) && "Percussion + Drums".equals(l.labels[Stems.DRUMS])
+            && "FX + Synth + Sample".equals(l.labels[Stems.OTHER]) && "Bass".equals(l.labels[Stems.BASS]),
+            "Suno's stems placed: Vocals = " + l.labels[Stems.VOCALS] + ", Drums = " + l.labels[Stems.DRUMS] + ", Other = " + l.labels[Stems.OTHER]);
+        Audio vocals = Wav.read(l.set.files[Stems.VOCALS]);
+        double worst = 0;
+        for (int i = 0; i < n; i++) worst = Math.max(worst, Math.abs(vocals.l[i] - (backing.l[i] + v.l[i])) + Math.abs(vocals.r[i] - (backing.r[i] + v.r[i])));
+        ok(worst == 0, "combined stems are the files added sample for sample (float, worst " + worst + ")");
+        Audio sum = Stems.mix(l.set, null, null);
+        double vsFull = 0;
+        for (int i = 0; i < n; i++) vsFull = Math.max(vsFull, Math.abs(sum.l[i] - full.l[i]));
+        ok(vsFull < 1e-5, String.format(Locale.US, "the stems add up to Suno's full mix (worst %.1e), so nothing was lost or doubled", vsFull));
+        l.discard();
+
+        // An instrumental-free-of-bass set: silence stands in, gets no level, and the round still masters.
+        List<File> noBass = new ArrayList<>(files);
+        noBass.removeIf(f -> f.getName().startsWith("4 "));
+        File zip2 = new File(dir, "Check Song no bass.zip");
+        zeroSizeZip(zip2, noBass);
+        StemFiles.Loaded nb = StemFiles.load(List.of(zip2));
+        ok(nb.silent[Stems.BASS] && nb.count() == 3 && nb.notes.stream().anyMatch(x -> x.startsWith("No Bass stem")), "a set with no bass: silence stands in, said plainly");
+        Stems.Balance bal = MasterJob.balanced(Stems.read(nb.set), Target.Style.POP_ROCK, nb.silent);
+        ok(bal.levelDb[Stems.BASS] == 0 && !bal.words().contains("Bass"), "the silent stand-in is never given a level: " + bal.words());
+        MasterJob.Settings s = new MasterJob.Settings();
+        s.use(nb); s.style = Target.Style.POP_ROCK; s.lufs = -14; s.mp3 = false; s.stemAuto = true;
+        s.outRoot = new File(dir, "suno-rounds");
+        MasterJob.Outcome o2 = MasterJob.run(s, (step, pc) -> { });
+        boolean good = o2.takes.size() == 3;
+        for (MasterJob.Take t : o2.takes) good &= Math.abs(t.lufs + 14) < 1 && t.truePeak <= t.ceiling + 0.05;
+        ok(good, String.format(Locale.US, "Suno stems master: %.2f / %.2f / %.2f LUFS, ceilings held", o2.takes.get(0).lufs, o2.takes.get(1).lufs, o2.takes.get(2).lufs));
+        ok(o2.sheet.contains("Stems: Left out the full mix") && o2.sheet.contains("Stems: Vocals = Backing Vocals + Vocals") && o2.sheet.contains("silence stands in"),
+            "the session sheet says how the set was made");
+        nb.discard();
+    }
+
+    /** A ZIP like Suno's: deflated entries whose local headers carry sizes of 0; the true sizes are only in the central directory. */
+    private static void zeroSizeZip(File zip, List<File> files) throws Exception {
+        java.io.ByteArrayOutputStream central = new java.io.ByteArrayOutputStream();
+        try (java.io.OutputStream out = new java.io.BufferedOutputStream(new FileOutputStream(zip))) {
+            long offset = 0;
+            for (File f : files) {
+                byte[] raw = Files.readAllBytes(f.toPath());
+                java.util.zip.CRC32 crc = new java.util.zip.CRC32(); crc.update(raw);
+                java.util.zip.Deflater def = new java.util.zip.Deflater(java.util.zip.Deflater.DEFAULT_COMPRESSION, true);
+                def.setInput(raw); def.finish();
+                java.io.ByteArrayOutputStream packed = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[1 << 16];
+                while (!def.finished()) packed.write(buf, 0, def.deflate(buf));
+                def.end();
+                byte[] data = packed.toByteArray(), name = f.getName().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                java.nio.ByteBuffer lh = java.nio.ByteBuffer.allocate(30 + name.length).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                lh.putInt(0x04034b50).putShort((short) 20).putShort((short) 0).putShort((short) 8).putShort((short) 0).putShort((short) 0x21)
+                  .putInt((int) crc.getValue()).putInt(0).putInt(0).putShort((short) name.length).putShort((short) 0).put(name);
+                out.write(lh.array()); out.write(data);
+                java.nio.ByteBuffer ch = java.nio.ByteBuffer.allocate(46 + name.length).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                ch.putInt(0x02014b50).putShort((short) 20).putShort((short) 20).putShort((short) 0).putShort((short) 8).putShort((short) 0).putShort((short) 0x21)
+                  .putInt((int) crc.getValue()).putInt(data.length).putInt(raw.length).putShort((short) name.length).putShort((short) 0).putShort((short) 0)
+                  .putShort((short) 0).putShort((short) 0).putInt(0).putInt((int) offset).put(name);
+                central.write(ch.array());
+                offset += lh.capacity() + data.length;
+            }
+            byte[] cd = central.toByteArray();
+            out.write(cd);
+            java.nio.ByteBuffer end = java.nio.ByteBuffer.allocate(22).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            end.putInt(0x06054b50).putShort((short) 0).putShort((short) 0).putShort((short) files.size()).putShort((short) files.size())
+               .putInt(cd.length).putInt((int) offset).putShort((short) 0);
+            out.write(end.array());
+        }
     }
 }

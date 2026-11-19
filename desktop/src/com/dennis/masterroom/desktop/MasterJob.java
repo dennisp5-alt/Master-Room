@@ -43,6 +43,11 @@ public final class MasterJob {
         public float[] stemRide;
         /** The stems' reading, if already made while loading (saves reading them again). */
         public Stems.Reading stemReading;
+        /** Stems the set did not have (silence stands in): never given a level. */
+        public boolean[] stemSilent = new boolean[Stems.COUNT];
+        /** How the set was made (full mix left out, files combined, silent stand-ins), for the session sheet. */
+        public List<String> stemPrep = new ArrayList<>();
+        public void use(StemFiles.Loaded l) { stems = l.set; stemTitle = l.title; stemSilent = l.silent.clone(); stemPrep = new ArrayList<>(l.notes); }
         public int stemCount() { int n = 0; if (stems != null) for (int i = 0; i < Stems.COUNT; i++) if (stems.has(i)) n++; return n; }
     }
 
@@ -126,6 +131,13 @@ public final class MasterJob {
         return Ffmpeg.decode(f);
     }
 
+    /** The engine's auto balance, with any silent stand-in left at 0 dB (there is nothing there to move). */
+    static Stems.Balance balanced(Stems.Reading reading, Target.Style style, boolean[] silent) {
+        Stems.Balance b = Stems.decide(reading, style);
+        if (silent != null) for (int i = 0; i < Stems.COUNT; i++) if (silent[i]) b.levelDb[i] = 0;
+        return b;
+    }
+
     public static String safeName(String song) {
         String base = song.replaceAll("\\.[A-Za-z0-9]{2,5}$", "");
         return base.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
@@ -174,8 +186,9 @@ public final class MasterJob {
             in = null;
             double[] levels = s.stemDb;
             float[] rides = s.stemRide;
+            for (String note : s.stemPrep) options.stemNotes.add("Stems: " + note);
             if (s.stemAuto) {
-                Stems.Balance balance = Stems.decide(s.stemReading != null ? s.stemReading : Stems.read(s.stems), s.style);
+                Stems.Balance balance = balanced(s.stemReading != null ? s.stemReading : Stems.read(s.stems), s.style, s.stemSilent);
                 levels = balance.levelDb;
                 rides = balance.rideDb;
                 options.stemNotes.add("Auto balance: " + balance.words());

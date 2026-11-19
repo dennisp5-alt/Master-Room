@@ -77,4 +77,9 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   vocals and other instruments are treated on their own, the stems balanced (with the vocal rides) and mastered.
   `StemCheck` requires the takes to be byte-identical to the phone's engine sequence. CLI:
   `"Master Room CLI.exe" --master --stems <WAVs or ZIP>`.
+- **Build 4.1, Suno stems:** Suno's download (numbered files such as `7 Vocals.wav`, `6 Backing_Vocals.wav`, extra
+  stems, the full mix as `0 Song Name.wav`, 32-bit float, ZIP sizes only in the central directory) now loads: the
+  full mix is left out and gives the title; Vocals + Backing Vocals, Drums + Percussion, and FX, Synth, Sample,
+  Strings and the like into Other are added sample for sample into one float WAV each; Keyboard goes with Piano;
+  a core stem a set lacks is stood in for by silence (never given a level). All of it is listed on the session sheet.
 - Next builds: references and settings, polish and an icon.
