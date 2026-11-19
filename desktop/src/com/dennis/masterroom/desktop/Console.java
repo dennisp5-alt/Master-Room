@@ -119,7 +119,7 @@ final class Console {
             if (playing && hidden) number = Double.NaN;
             center(g, Double.isFinite(number) ? String.format(Locale.US, "%.1f", number) : "--", Look.size(Look.mono, 30), Look.TEXT, 118);
             center(g, caption, Look.size(Look.label, 11), Look.DIM, 134);
-            center(g, String.format(Locale.US, "TARGET %.1f LUFS", target), Look.size(Look.label, 13), Look.AMBER, 156);
+            center(g, String.format(Locale.US, "TARGET %.1f LUFS  ·  CEILING %.1f dBTP", target, com.dennis.masterroom.engine.Engineer.ceilingFor(target)), Look.size(Look.label, 12), Look.AMBER, 156);
             g.setFont(Look.size(Look.label, 11)); g.setColor(Look.DIM);
             g.drawString("-24", 12, 178);
             g.drawString("-6", W - 12 - g.getFontMetrics().stringWidth("-6"), 178);
