@@ -36,7 +36,9 @@ public final class MasterJob {
 
     public static final class Take {
         public String label, about, verdict, streaming, report;
-        public double lufs, truePeak, ceiling;
+        public double lufs, truePeak, ceiling, lra;
+        /** Measured tone (31 third-octave bands, mid), for the console. */
+        public double[] mid;
         public File[] files;
     }
 
@@ -44,7 +46,12 @@ public final class MasterJob {
         public File dir, source;
         public Listen before;
         /** The song as it came in (from {@link #before}): integrated loudness and true peak, for the Original row and level matching. */
-        public double beforeLufs, beforePeak;
+        public double beforeLufs, beforePeak, beforeLra;
+        /** The song's tone as it came in, and the target tone the round aimed at (31 bands, mid). */
+        public double[] beforeMid, targetMid;
+        /** The loudness asked for, and the style. */
+        public double targetLufs = -14;
+        public Target.Style style;
         public final List<Take> takes = new ArrayList<>();
         public String sheet;
         /** The settings this round used, in words, e.g. "Classic Rock · -14 LUFS · commercial reference · clean-up on · MP3 320". */
@@ -152,6 +159,11 @@ public final class MasterJob {
         out.before = session.before;
         out.beforeLufs = session.before.loudness.integrated;
         out.beforePeak = session.before.truePeakDb;
+        out.beforeLra = session.before.loudness.lra;
+        out.beforeMid = session.before.midDb;
+        out.targetMid = target.midDb;
+        out.targetLufs = s.lufs;
+        out.style = s.style;
         List<Engineer.Result> results = new ArrayList<>();
         for (Engineer.Recipe recipe : recipes) {
             takeIndex[0]++;
@@ -172,6 +184,8 @@ public final class MasterJob {
             t.about = recipe.about;
             t.lufs = r.after.loudness.integrated;
             t.truePeak = r.after.truePeakDb;
+            t.lra = r.after.loudness.lra;
+            t.mid = r.after.midDb;
             t.ceiling = r.ceilingDb;
             t.verdict = r.verdict;
             t.report = r.distortion == null ? "" : String.valueOf(r.distortion);

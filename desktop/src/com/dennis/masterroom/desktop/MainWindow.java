@@ -2,6 +2,7 @@ package com.dennis.masterroom.desktop;
 
 import com.dennis.masterroom.engine.Audio;
 import com.dennis.masterroom.engine.Listen;
+import com.dennis.masterroom.engine.Spectrum;
 import com.dennis.masterroom.engine.Target;
 
 import javax.imageio.ImageIO;
@@ -28,7 +29,8 @@ import java.util.prefs.Preferences;
 /**
  * Pick or drop a song, choose style and level, master the three takes, see each take's loudness,
  * true peak and checks. Build 2: play the original and the takes against each other, level-matched,
- * switching without a gap, with the phone's blind test. Meters and stems come in the next builds.
+ * switching without a gap, with the phone's blind test. Build 3: the console beside it (the phone's
+ * loudness arc, EQ lights and tone view), following what is being heard. Stems come next.
  */
 final class MainWindow {
     private static final Preferences PREFS = Preferences.userNodeForPackage(MainWindow.class);
@@ -60,6 +62,21 @@ final class MainWindow {
     private List<Row> rows = List.of();
     private int playing;
     private boolean listening;
+    // Console (build 3)
+    private final Console.Meter meter = new Console.Meter();
+    private final Console.Lights lights = new Console.Lights();
+    private final Console.Tone tone = new Console.Tone();
+    private final JButton lightsTab = segment("LIGHTS"), toneTab = segment("TONE");
+    private final JPanel views = new JPanel(new CardLayout());
+    private final JLabel consoleMode = text(" ", Look.size(Look.mono, 12), Look.AMBER_DIM);
+    private final JLabel viewNote = text(" ", Look.size(Look.body, 12), Look.DIM);
+    private final Tile readLufs = new Tile("INTEGRATED", "LUFS"), readPeak = new Tile("TRUE PEAK", "dBTP"), readRange = new Tile("RANGE", "LU");
+    private final AbPlayer.Moment heard = new AbPlayer.Moment();
+    private boolean heardOn, showingTone;
+    /** Waveform overview per version, in the player's order. */
+    private float[][] peaksByVersion;
+    /** The round on screen (the demo has no folder). */
+    private MasterJob.Outcome round;
     private File song;
     private MasterJob.Outcome last;
     private boolean busy;
@@ -84,7 +101,11 @@ final class MainWindow {
         middle.add(gap(10));
         middle.add(transport());
         middle.add(Box.createVerticalGlue());
-        root.add(middle, BorderLayout.CENTER);
+        JPanel centre = new JPanel(new BorderLayout(16, 0));
+        centre.setOpaque(false);
+        centre.add(middle, BorderLayout.CENTER);
+        centre.add(consolePanel(), BorderLayout.EAST);
+        root.add(centre, BorderLayout.CENTER);
 
         for (double d : LEVELS) level.addItem(String.format(Locale.US, "%.0f LUFS", d));
         styleCombo(style); styleCombo(level);
@@ -120,7 +141,17 @@ final class MainWindow {
         match.setSelected(true);
         match.addActionListener(e -> matchChanged());
         player.onStop(() -> SwingUtilities.invokeLater(this::refreshTransport));
+        meter.live = new Console.Live() {
+            @Override public boolean on() { return heardOn; }
+            @Override public float light() { return heard.light; }
+            @Override public double lufs() { return heard.lufs; }
+        };
+        lights.source = out -> { if (!heardOn) return false; System.arraycopy(heard.bars, 0, out, 0, out.length); return true; };
+        lightsTab.addActionListener(e -> showTone(false));
+        toneTab.addActionListener(e -> showTone(true));
+        level.addActionListener(e -> refreshConsole());
         setListening(false);
+        showTone(PREFS.getBoolean("toneView", false));
         engineLine.setText(Ffmpeg.available() ? "FFmpeg ready: FLAC, M4A, AAC and the AAC streaming check" : "FFmpeg not found: WAV and MP3 only");
         root.setTransferHandler(new TransferHandler() {
             @Override public boolean canImport(TransferSupport s) { return !busy && s.isDataFlavorSupported(DataFlavor.javaFileListFlavor); }
@@ -138,7 +169,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 2.1 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 3 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -190,6 +221,85 @@ final class MainWindow {
         r.add(match); r.add(Box.createHorizontalStrut(12)); r.add(blindTest);
         for (AbstractButton b : new AbstractButton[]{play, blindTest, match, open, master, stop, folder, sheet, saveTo, commercial, cleanUp, mp3}) b.setFocusable(false);
         return r;
+    }
+
+    private JComponent consolePanel() {
+        JPanel p = panel();
+        p.setPreferredSize(new Dimension(380, 600));
+        JPanel c = column();
+        JPanel title = row();
+        title.add(text("CONSOLE", Look.size(Look.label, 13), Look.AMBER_DIM));
+        title.add(Box.createHorizontalGlue());
+        title.add(consoleMode);
+        c.add(title);
+        c.add(gap(8));
+        JPanel well = new JPanel(new BorderLayout()) {
+            @Override protected void paintComponent(Graphics g0) {
+                Graphics2D g = (Graphics2D) g0.create(); g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(Look.WELL); g.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 12, 12);
+                g.setColor(Look.HAIR); g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 12, 12); g.dispose();
+            }
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
+        well.setOpaque(false); well.setAlignmentX(0); well.add(meter, BorderLayout.CENTER);
+        meter.setToolTipText("Loudness. At rest: the selected version as measured. Playing: what you hear now (momentary, 400 ms). The gold mark is the target.");
+        c.add(well);
+        c.add(gap(10));
+        JPanel tiles = new JPanel(new GridLayout(1, 3, 8, 0)) { @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); } };
+        tiles.setOpaque(false); tiles.setAlignmentX(0);
+        tiles.add(readLufs); tiles.add(readPeak); tiles.add(readRange);
+        c.add(tiles);
+        c.add(gap(12));
+        JPanel tabs = new JPanel(new GridLayout(1, 2, 6, 0)) { @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); } };
+        tabs.setOpaque(false); tabs.setAlignmentX(0);
+        tabs.add(lightsTab); tabs.add(toneTab);
+        lightsTab.setToolTipText("EQ lights: the spectrum of what you hear. At rest, the selected version's overall tone.");
+        toneTab.setToolTipText("Tone: the original and the selected take against the style's target curve.");
+        c.add(tabs);
+        c.add(gap(8));
+        views.setOpaque(false); views.setAlignmentX(0);
+        views.add(lights, "lights"); views.add(tone, "tone");
+        views.setPreferredSize(new Dimension(340, 170));
+        views.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+        c.add(views);
+        c.add(gap(6));
+        c.add(viewNote);
+        p.add(c, BorderLayout.CENTER);
+        return p;
+    }
+
+    private void showTone(boolean on) {
+        showingTone = on;
+        ((CardLayout) views.getLayout()).show(views, on ? "tone" : "lights");
+        lightsTab.putClientProperty("on", !on); toneTab.putClientProperty("on", on);
+        lightsTab.repaint(); toneTab.repaint();
+        viewNote.setText("<html><div style='width:300px'>" + (on
+            ? "Each curve is lined up with the target from 150 Hz to 3 kHz. Above the dashed line means more than the target there."
+            : "The spectrum of what you hear, live. When nothing is playing: the selected version's overall tone.") + "</div></html>");
+        PREFS.putBoolean("toneView", on);
+    }
+
+    /** Everything the console shows for the selected version (numbers hidden during the blind test). */
+    private void refreshConsole() {
+        boolean any = !rows.isEmpty() && playing < rows.size();
+        boolean hide = blind.hidden();
+        Row cur = any ? rows.get(playing) : null;
+        meter.target = (float) (round != null && any ? round.targetLufs : LEVELS[Math.max(0, level.getSelectedIndex())]);
+        meter.hidden = hide;
+        meter.measured = cur == null ? Float.NaN : (float) cur.lufs;
+        meter.restingCaption = cur == null ? "AWAITING A ROUND" : cur.name.toUpperCase(Locale.ROOT) + "  ·  LUFS";
+        readLufs.value = cur == null || hide ? "--" : String.format(Locale.US, "%.1f", cur.lufs);
+        readPeak.value = cur == null || hide ? "--" : String.format(Locale.US, "%.1f", cur.peak);
+        readRange.value = cur == null || hide || Double.isNaN(cur.lra) ? "--" : String.format(Locale.US, "%.1f", cur.lra);
+        readPeak.warn = cur != null && !hide && !cur.original && cur.peak > cur.ceiling + 0.05;
+        lights.setResting(Spectrum.resting(!any ? null : hide ? rows.get(0).mid : cur.mid));
+        double[] target = round == null ? null : round.targetMid;
+        double[] src = !any ? null : Console.Tone.againstTarget(rows.get(0).mid, target);
+        double[] take = !any || cur.original ? null : Console.Tone.againstTarget(cur.mid, target);
+        tone.show(src, take, cur == null ? "" : cur.name, hide);
+        if (peaksByVersion != null && any) wave.peaks = peaksByVersion[hide ? 0 : Math.min(playing, peaksByVersion.length - 1)];
+        consoleMode.setText(!any ? " " : player.isPlaying() || meter.playing() ? "PLAYING  ·  AS HEARD" : hide ? "BLIND TEST" : "SELECTED  ·  " + cur.name.toUpperCase(Locale.ROOT));
+        meter.repaint(); lights.repaint(); readLufs.repaint(); readPeak.repaint(); readRange.repaint(); wave.repaint();
     }
 
     // ---------- Actions ----------
@@ -259,12 +369,12 @@ final class MainWindow {
     }
 
     // ---------- Listening ----------
-    record Row(String name, String about, double lufs, double peak, double ceiling, String verdict, String streaming, boolean original) {}
+    record Row(String name, String about, double lufs, double peak, double ceiling, double lra, double[] mid, String verdict, String streaming, boolean original) {}
 
     static List<Row> rowsFor(MasterJob.Outcome o) {
         List<Row> r = new ArrayList<>();
-        r.add(new Row("Original", "The song as it came in, before mastering", o.beforeLufs, o.beforePeak, Double.NaN, "As it came in", "", true));
-        for (MasterJob.Take t : o.takes) r.add(new Row(t.label, t.about, t.lufs, t.truePeak, t.ceiling, t.verdict, t.streaming, false));
+        r.add(new Row("Original", "The song as it came in, before mastering", o.beforeLufs, o.beforePeak, Double.NaN, o.beforeLra, o.beforeMid, "As it came in", "", true));
+        for (MasterJob.Take t : o.takes) r.add(new Row(t.label, t.about, t.lufs, t.truePeak, t.ceiling, t.lra, t.mid, t.verdict, t.streaming, false));
         return r;
     }
 
@@ -276,29 +386,34 @@ final class MainWindow {
         return AbMixer.matchDb(lufs, peak, master);
     }
 
-    private void showRows(List<Row> r) {
-        rows = r; blind.reset(r.size()); playing = 0;
+    private void showRows(List<Row> r, MasterJob.Outcome o) {
+        rows = r; round = o; blind.reset(r.size()); playing = 0;
         match.setSelected(true); match.setEnabled(true); blindTest.setText("Blind test");
         results.repaint();
+        refreshConsole();
     }
 
     /** Opens the original and the 24-bit takes for playback (files are only read). */
     private void loadListening(MasterJob.Outcome o) {
-        showRows(rowsFor(o));
+        showRows(rowsFor(o), o);
         status.setToolTipText(o.settings);
-        new SwingWorker<float[], Void>() {
-            @Override protected float[] doInBackground() throws Exception {
+        new SwingWorker<float[][], Void>() {
+            @Override protected float[][] doInBackground() throws Exception {
                 player.mix.clear();
                 player.mix.add(new AbMixer.Version("Original", o.source, o.beforeLufs, o.beforePeak, false));
                 for (MasterJob.Take t : o.takes) player.mix.add(new AbMixer.Version(t.label, t.files[0], t.lufs, t.truePeak, true));
                 player.mix.setMatched(true);
                 player.mix.select(0);
-                return Overview.peaks(o.source, 1600);
+                float[][] peaks = new float[1 + o.takes.size()][];
+                peaks[0] = Overview.peaks(o.source, 1600);
+                for (int i = 0; i < o.takes.size(); i++) peaks[i + 1] = Overview.peaks(o.takes.get(i).files[0], 1600);
+                return peaks;
             }
             @Override protected void done() {
                 try {
-                    wave.peaks = get();
+                    peaksByVersion = get();
                     setListening(true);
+                    refreshConsole();
                 } catch (Exception e) {
                     player.mix.clear();
                     status.setText("Listening is not available for this round: " + rootMessage(e));
@@ -311,9 +426,12 @@ final class MainWindow {
         player.pause();
         player.mix.clear();
         wave.peaks = null;
+        peaksByVersion = null;
         rows = List.of();
+        round = null;
         blind.reset(0);
         setListening(false);
+        refreshConsole();
     }
 
     private void setListening(boolean on) {
@@ -327,6 +445,7 @@ final class MainWindow {
         play.setText(player.isPlaying() ? "Pause" : "Play");
         if (player.problem() != null) status.setText(player.problem());
         wave.repaint();
+        refreshConsole();
     }
 
     private void togglePlay() {
@@ -341,6 +460,7 @@ final class MainWindow {
         playing = blind.version(r);
         player.mix.select(playing);
         results.repaint();
+        refreshConsole();
     }
 
     private void seekBy(double seconds) {
@@ -374,7 +494,9 @@ final class MainWindow {
                 try {
                     StringBuilder names = new StringBuilder();
                     for (Row x : rows) names.append(names.length() == 0 ? "" : ", ").append(x.name);
-                    File f = Blind.log(last.dir.getParentFile().getParentFile(), last.dir.getParentFile().getName(), last.settings, rows.get(v).name, names.toString());
+                    File outRootOfRound = last.dir.getParentFile().getParentFile();
+                    File f = Blind.log(outRootOfRound, last.dir.getParentFile().getName(), last.settings, rows.get(v).name, names.toString());
+                    Blind.taste(outRootOfRound, last.style, rows.get(v).original ? "Source" : rows.get(v).name);
                     note = " Saved to " + f.getName() + ".";
                 } catch (Exception e) {
                     note = " (Could not save the pick: " + rootMessage(e) + ")";
@@ -389,6 +511,7 @@ final class MainWindow {
             }
         }
         results.repaint();
+        refreshConsole();
     }
 
     /** Space, 1 to 4, M, arrows: work wherever focus is in the window (not in dialogs or open lists). */
@@ -471,10 +594,17 @@ final class MainWindow {
         private MasterJob.Outcome o;
         ResultsView() {
             int h = TOP + 4 * ROW + 40;
-            setPreferredSize(new Dimension(900, h)); setMaximumSize(new Dimension(Integer.MAX_VALUE, h)); setMinimumSize(new Dimension(300, h));
+            setPreferredSize(new Dimension(800, h)); setMaximumSize(new Dimension(Integer.MAX_VALUE, h)); setMinimumSize(new Dimension(300, h));
             addMouseListener(new MouseAdapter() {
                 @Override public void mousePressed(MouseEvent e) { if (e.getY() >= TOP) selectRow((e.getY() - TOP) / ROW); }
             });
+            setToolTipText("");
+        }
+        @Override public String getToolTipText(MouseEvent e) {
+            int r = e.getY() < TOP ? -1 : (e.getY() - TOP) / ROW;
+            if (o == null || r < 0 || r >= rows.size() || r >= 4 || blind.hidden()) return null;
+            Row t = rows.get(blind.version(r));
+            return "<html><b>" + esc(t.name) + "</b><br>" + esc(t.about) + (t.original ? "" : "<br>" + esc(t.verdict) + "<br>" + esc(t.streaming)) + "</html>";
         }
         void show(MasterJob.Outcome o) { this.o = o; if (o == null) rows = List.of(); repaint(); }
         @Override protected void paintComponent(Graphics g0) {
@@ -484,9 +614,9 @@ final class MainWindow {
             int w = getWidth(), h = getHeight();
             g.setColor(Look.PANEL); g.fillRoundRect(0, 0, w - 1, h - 1, 14, 14);
             g.setColor(Look.HAIR); g.drawRoundRect(0, 0, w - 1, h - 1, 14, 14);
-            int[] x = {18, 172, 280, 388, 486, 736};
+            int[] x = {18, 192, 300, 408, 506};
             g.setFont(Look.size(Look.label, 13)); g.setColor(Look.AMBER_DIM);
-            String[] heads = {"VERSION", "LOUDNESS", "TRUE PEAK", "PLAYS AT", "CHECK", "STREAMING"};
+            String[] heads = {"VERSION", "LOUDNESS", "TRUE PEAK", "PLAYS AT", "CHECK AND STREAMING"};
             for (int i = 0; i < heads.length; i++) g.drawString(heads[i], x[i], 28);
             g.setColor(Look.HAIR); g.drawLine(12, 40, w - 12, 40);
             if (o == null || rows.isEmpty()) {
@@ -510,7 +640,7 @@ final class MainWindow {
                 g.drawString(hide ? "Version " + (r + 1) : t.name, x[0] + 20, y);
                 String about = hide ? "Name hidden until you pick" : reveal ? (r == blind.picked ? "Version " + (r + 1) + ", your pick" : "Version " + (r + 1)) : t.about;
                 g.setFont(Look.size(Look.body, 12)); g.setColor(reveal && r == blind.picked ? Look.AMBER : Look.DIM);
-                clip(g, about, x[0] + 20, y + 17, x[1] - x[0] - 30 + (hide || reveal ? 200 : 300), g.getColor());
+                clip(g, about, x[0] + 20, y + 17, x[4] - x[0] - 36, g.getColor());
                 if (hide) continue;
                 g.setFont(Look.size(Look.mono, 14)); g.setColor(Look.MID);
                 g.drawString(String.format(Locale.US, "%.1f LUFS", t.lufs), x[1], y);
@@ -519,8 +649,9 @@ final class MainWindow {
                 g.setColor(matched ? Look.BLUE : Look.DIM);
                 g.drawString(!matched ? "as is" : Math.abs(trim[v]) < 0.05 ? "0.0 dB" : String.format(Locale.US, "%+.1f dB", trim[v]), x[3], y);
                 g.setFont(Look.size(Look.body, 14));
-                clip(g, t.verdict, x[4], y, x[5] - x[4] - 16, t.original ? Look.DIM : t.verdict.toLowerCase(Locale.ROOT).contains("passed") ? Look.BLUE : Look.HOT);
-                clip(g, t.streaming, x[5], y, w - x[5] - 18, t.streaming.startsWith("Safe") ? Look.BLUE : Look.HOT);
+                clip(g, t.verdict, x[4], y, w - x[4] - 16, t.original ? Look.DIM : t.verdict.toLowerCase(Locale.ROOT).contains("passed") ? Look.BLUE : Look.HOT);
+                g.setFont(Look.size(Look.body, 12));
+                clip(g, t.streaming, x[4], y + 17, w - x[4] - 16, t.streaming.startsWith("Safe") ? Look.BLUE : Look.HOT);
             }
             if (o.settings != null) {
                 g.setColor(Look.HAIR); g.drawLine(12, h - 34, w - 12, h - 34);
@@ -530,6 +661,8 @@ final class MainWindow {
             g.dispose();
         }
     }
+
+    private static String esc(String s) { return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"); }
 
     private static void clip(Graphics2D g, String s, int x, int y, int width, Color c) {
         if (s == null) s = "";
@@ -590,6 +723,48 @@ final class MainWindow {
     static String clock(double seconds) {
         int s = (int) Math.max(0, seconds);
         return s / 60 + ":" + String.format(Locale.US, "%02d", s % 60);
+    }
+
+    /** A reading on the console: title, value, unit. */
+    private static final class Tile extends JComponent {
+        final String title, unit;
+        String value = "--";
+        boolean warn;
+        Tile(String title, String unit) { this.title = title; this.unit = unit; setPreferredSize(new Dimension(100, 60)); }
+        @Override protected void paintComponent(Graphics g0) {
+            Graphics2D g = (Graphics2D) g0.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB);
+            g.setColor(Look.WELL); g.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 10, 10);
+            g.setColor(Look.HAIR); g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 10, 10);
+            g.setFont(Look.size(Look.label, 11)); g.setColor(Look.AMBER_DIM); g.drawString(title, 10, 18);
+            g.setFont(Look.size(Look.mono, 20)); g.setColor(value.equals("--") ? Look.DIM : warn ? Look.HOT : Look.TEXT); g.drawString(value, 10, 46);
+            int vx = 10 + g.getFontMetrics().stringWidth(value) + 5;
+            g.setFont(Look.size(Look.label, 11)); g.setColor(Look.DIM); g.drawString(unit, vx, 46);
+            g.dispose();
+        }
+    }
+
+    /** One half of the console's LIGHTS / TONE switch; gold when on. */
+    private static JButton segment(String s) {
+        JButton b = new JButton(s) {
+            @Override protected void paintComponent(Graphics g0) {
+                Graphics2D g = (Graphics2D) g0.create(); g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                boolean on = Boolean.TRUE.equals(getClientProperty("on"));
+                int w = getWidth(), h = getHeight();
+                if (on) g.setPaint(new GradientPaint(0, 0, Look.GOLD_HI, 0, h, Look.GOLD_LO)); else g.setColor(getModel().isRollover() ? Look.PANEL_TOP : Look.RAISED);
+                g.fillRoundRect(0, 0, w - 1, h - 1, 10, 10);
+                g.setColor(on ? Look.GOLD_HI : Look.LINE); g.drawRoundRect(0, 0, w - 1, h - 1, 10, 10);
+                g.setFont(getFont()); FontMetrics fm = g.getFontMetrics();
+                g.setColor(on ? Look.WELL : Look.TEXT);
+                g.drawString(getText(), (w - fm.stringWidth(getText())) / 2, (h + fm.getAscent() - fm.getDescent()) / 2);
+                g.dispose();
+            }
+        };
+        b.setFont(Look.size(Look.label, 14)); b.setContentAreaFilled(false); b.setBorderPainted(false); b.setFocusPainted(false); b.setFocusable(false);
+        b.setRolloverEnabled(true); b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.setPreferredSize(new Dimension(120, 32));
+        return b;
     }
 
     // ---------- Small parts ----------
@@ -680,22 +855,29 @@ final class MainWindow {
 
     // ---------- Screenshot (checks) ----------
     /** Paints the window into a PNG without showing it, optionally with sample results. */
-    static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy, boolean blindOn) throws Exception {
+    static void screenshot(File png, int w, int h, MasterJob.Outcome demo, String songLabel, boolean busy, boolean blindOn, boolean toneView) throws Exception {
         MainWindow m = new MainWindow();
+        m.showTone(false);
         if (songLabel != null) { m.songName.setText(songLabel); m.songFacts.setText("As it came in: -18.2 LUFS, 6.4 LU range, -3.1 dBTP true peak"); m.master.setEnabled(true); }
         if (demo != null) {
-            m.results.show(demo); m.showRows(rowsFor(demo)); m.progress.setValue(100); m.status.setText("Done in 1.4 minutes. Takes are in " + demo.dir); m.folder.setEnabled(true); m.sheet.setEnabled(true);
+            m.results.show(demo); m.showRows(rowsFor(demo), demo); m.progress.setValue(100); m.status.setText("Done in 1.4 minutes. Takes are in " + demo.dir); m.folder.setEnabled(true); m.sheet.setEnabled(true);
             float[] p = new float[1600];
             Random r = new Random(3);
             for (int i = 0; i < p.length; i++) { double env = i < 80 ? i / 80.0 : i > 1520 ? (1600 - i) / 80.0 : (i / 260) % 2 == 0 ? 0.55 : 0.85; p[i] = (float) (env * (0.75 + 0.25 * r.nextDouble())); }
             m.wave.peaks = p; m.wave.demoAt = 0.32; m.wave.demoLength = 214;
             m.listening = true; m.play.setEnabled(true); m.blindTest.setEnabled(true); m.match.setEnabled(true); m.play.setText("Pause");
             m.playing = 2;
+            float[] bars = Spectrum.resting(demo.takes.get(1).mid);
+            for (int i = 0; i < bars.length; i++) bars[i] = (float) Math.min(1, bars[i] * (1.15 + 0.35 * Math.sin(i * 1.7)));
+            m.lights.demo = bars;
+            m.meter.demoLight = -13.4f; m.meter.demoLufs = -14.2;
             if (blindOn) {
                 m.playing = m.blind.start(1, true);
                 m.match.setEnabled(false); m.blindTest.setText("Pick this one");
                 m.status.setText("Blind test: names hidden, order shuffled, levels matched. Listen with 1 to 4, then Pick this one.");
             }
+            m.refreshConsole();
+            if (toneView) m.showTone(true);
         }
         if (busy) { m.song = new File("x.wav"); m.commercial.setSelected(true); m.cleanUp.setSelected(true); m.mp3.setSelected(false); m.setBusy(true); m.progress.setValue(78); m.status.setText("Punch: checking for distortion"); }
         m.root.setSize(w, h);
@@ -717,11 +899,18 @@ final class MainWindow {
         JFrame f = new JFrame("Master Room");
         f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         f.setContentPane(root);
-        f.setMinimumSize(new Dimension(1040, 750));
-        f.setSize(1180, 780);
+        f.setMinimumSize(new Dimension(1300, 760));
+        Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        f.setSize(Math.min(1440, screen.width), Math.min(820, screen.height));
         f.addWindowListener(new WindowAdapter() { @Override public void windowClosing(WindowEvent e) { player.close(); } });
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> key(e, f));
-        new Timer(40, e -> { if (listening) { wave.repaint(); if (play.getText().equals("Pause") != player.isPlaying()) refreshTransport(); } }).start();
+        new Timer(40, e -> {
+            boolean was = heardOn;
+            heardOn = player.now(heard);
+            if (listening) { wave.repaint(); if (play.getText().equals("Pause") != player.isPlaying()) refreshTransport(); }
+            if (heardOn || was || meter.settling()) meter.repaint();
+            if (heardOn || was || lights.settling) lights.repaint();
+        }).start();
         f.setLocationRelativeTo(null);
         f.setVisible(true);
     }

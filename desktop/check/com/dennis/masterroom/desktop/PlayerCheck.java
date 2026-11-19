@@ -125,6 +125,36 @@ public final class PlayerCheck {
         for (float p : peaks) seen = Math.max(seen, p);
         ok(peaks.length == 800 && Math.abs(seen - max) < 1e-6, "waveform overview peak matches the file");
 
+        // Build 3: what the console measures and shows.
+        AbPlayer.Analyser an = new AbPlayer.Analyser(48000);
+        AbPlayer.Moment m = new AbPlayer.Moment();
+        float[] sine = new float[AbMixer.BLOCK * 2];
+        long n0 = 0;
+        for (int blk = 0; blk < 12; blk++) {
+            for (int i = 0; i < AbMixer.BLOCK; i++, n0++) { float sv = (float) (0.1 * Math.sin(2 * Math.PI * 997 * n0 / 48000.0)); sine[2 * i] = sv; sine[2 * i + 1] = sv; }
+            an.take(sine, m);
+        }
+        int top = 0;
+        for (int k = 1; k < m.bars.length; k++) if (m.bars[k] > m.bars[top]) top = k;
+        ok(Math.abs(m.lufs - (-20.0)) < 0.1, String.format(Locale.US, "console loudness: 997 Hz at -20 dBFS both sides reads %.2f LUFS (BS.1770: -20.0)", m.lufs));
+        ok(Math.abs(m.light - (-20.69)) < 0.1, String.format(Locale.US, "console lights level %.2f (unweighted, -20.69 expected)", m.light));
+        ok(top == 14, "console lights: 997 Hz lights bar " + top + " (bar 14 holds 1 kHz)");
+        AbPlayer.Analyser fresh = new AbPlayer.Analyser(48000);
+        fresh.take(sine, m);
+        ok(Double.isNaN(m.lufs), "momentary loudness waits for 400 ms of audio (shows -- until then)");
+
+        double[] flat = Console.Tone.againstTarget(o.targetMid, o.targetMid);
+        double worstFlat = 0;
+        for (double d : flat) worstFlat = Math.max(worstFlat, Math.abs(d));
+        ok(worstFlat < 1e-9, "tone view: the target against itself is a flat line");
+        boolean toneData = o.beforeMid != null && o.beforeMid.length == 31 && o.targetMid.length == 31 && Double.isFinite(o.beforeLra);
+        for (MasterJob.Take t : o.takes) toneData &= t.mid != null && t.mid.length == 31 && Double.isFinite(t.lra);
+        ok(toneData, "each version carries its tone (31 bands) and loudness range for the console");
+        double[] take = Console.Tone.againstTarget(o.takes.get(0).mid, o.targetMid);
+        double centre = 0; int cn = 0;
+        for (int i = 0; i < 31; i++) if (com.dennis.masterroom.engine.Listen.BANDS[i] >= 150 && com.dennis.masterroom.engine.Listen.BANDS[i] <= 3000) { centre += take[i]; cn++; }
+        ok(Math.abs(centre / cn) < 1e-9, "tone curves are lined up on 150 Hz to 3 kHz, as on the phone");
+
         mix.clear();
         return fails;
     }

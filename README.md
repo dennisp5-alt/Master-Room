@@ -64,4 +64,10 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   `Documents\Master Room\blind test picks.txt`. `PlayerCheck` checks matching, crossfades and exact playback.
 - **Build 2.1:** rounds go to the Documents folder Windows actually uses (it can be moved to OneDrive or another
   drive), and **Change** next to Master picks any other folder (remembered).
-- Next builds: Console meters and views, stems, references and settings, polish.
+- **Build 3, console:** a column beside the results with the phone's loudness arc (gold target mark; at rest the
+  selected version's measured loudness, playing: momentary loudness of what you hear), integrated / true peak / range
+  readings, and the LIGHTS (live spectrum) and TONE (original and take against the style's target) views. The
+  waveform follows the selected version. Everything is measured from the audio being heard, lined up with the sound
+  card's position; numbers stay hidden in the blind test. Blind picks are also kept in the phone's taste format
+  (`taste.txt`) for a Yours take later.
+- Next builds: stems, references and settings, polish.

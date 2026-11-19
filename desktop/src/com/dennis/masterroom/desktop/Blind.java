@@ -67,6 +67,14 @@ final class Blind {
         return row(playingVersion);
     }
 
+    /** The phone's taste record ("style|blind|take"), so blind picks can shape a Yours take later, as on the phone. */
+    static void taste(File outRoot, com.dennis.masterroom.engine.Target.Style style, String take) throws IOException {
+        if (style == null) return;
+        File f = new File(outRoot, "taste.txt");
+        Files.writeString(f.toPath(), com.dennis.masterroom.engine.Taste.record(style.name(), "blind", take) + System.lineSeparator(),
+            StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+    }
+
     /** One line per blind pick, kept beside the rounds so the picks can be read (and used) later. */
     static File log(File outRoot, String song, String settings, String pickedTake, String versions) throws IOException {
         File f = new File(outRoot, "blind test picks.txt");

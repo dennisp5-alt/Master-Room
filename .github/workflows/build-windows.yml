@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  APP_VERSION: '0.2.1'
+  APP_VERSION: '0.3.0'
   # FFmpeg LGPL builds by BtbN: the newest stable release branch (n<version>-latest-win64-lgpl), looked up at build time.
   # Only ffmpeg.exe and its licence are shipped.
   FFMPEG_REPO: 'BtbN/FFmpeg-Builds'
@@ -68,7 +68,7 @@ jobs:
           cp ffx/*/LICENSE.txt build/desktop/app/ffmpeg/LICENSE-FFmpeg-LGPL.txt
           build/desktop/app/ffmpeg/ffmpeg.exe -hide_banner -version | head -1
 
-      - name: Checks on Windows (parity with the engine, loudness, ceilings, MP3, FLAC, AAC, A/B player)
+      - name: Checks on Windows (parity with the engine, loudness, ceilings, MP3, FLAC, AAC, A/B player, console)
         run: |
           java -Xmx3g -Dmasterroom.ffmpeg=build/desktop/app/ffmpeg/ffmpeg.exe -cp "build/desktop/classes;build/desktop/check" DesktopCheck 40 "check-song.wav" | tee desktop-check.txt
           grep -q DESKTOP_CHECK_PASS desktop-check.txt
@@ -79,6 +79,7 @@ jobs:
           java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-results.png --demo
           java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-locked.png --busy
           java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-blind.png --demo --blind
+          java -cp build/desktop/classes com.dennis.masterroom.desktop.Main --screenshot window-tone.png --demo --tone
 
       - name: Package (portable app with Java and FFmpeg included)
         run: |
