@@ -82,4 +82,6 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   full mix is left out and gives the title; Vocals + Backing Vocals, Drums + Percussion, and FX, Synth, Sample,
   Strings and the like into Other are added sample for sample into one float WAV each; Keyboard goes with Piano;
   a core stem a set lacks is stood in for by silence (never given a level). All of it is listed on the session sheet.
+- **Build 4.2:** Suno downloads that start with a stem (`0 Lead Vocals.wav`, no full mix) keep it: only a number-0 file
+  that names no stem is taken for the full mix. Numbered sets take the title from the ZIP or folder name.
 - Next builds: references and settings, polish and an icon.

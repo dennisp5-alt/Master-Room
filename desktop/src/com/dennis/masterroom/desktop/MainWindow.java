@@ -204,7 +204,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 4.1 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 4.2 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -851,7 +851,7 @@ final class MainWindow {
                 : part == Stems.VOCALS ? "cleaned on its own, plus the rides" : "cleaned on its own";
             String what = stems.labels[part];
             boolean combined = what != null && what.contains(" + ");
-            JLabel about = text((combined ? what : "Stem") + ": " + treated, Look.size(Look.body, 12), combined ? Look.MID : Look.DIM);
+            JLabel about = text((what != null ? what : Stems.NAMES[part]) + ": " + treated, Look.size(Look.body, 12), combined ? Look.MID : Look.DIM);
             about.setToolTipText(combined ? "Combined from " + what + ", added together sample for sample" : null);
             r.add(about);
             r.add(Box.createHorizontalGlue());

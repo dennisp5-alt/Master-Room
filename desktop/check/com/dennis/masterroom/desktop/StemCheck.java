@@ -186,6 +186,36 @@ public final class StemCheck {
         ok(vsFull < 1e-5, String.format(Locale.US, "the stems add up to Suno's full mix (worst %.1e), so nothing was lost or doubled", vsFull));
         l.discard();
 
+        // Suno's other layout (Dennis's real download): no full mix, "0 Lead Vocals.wav" first, eleven stems.
+        File porch = new File(dir, "porch");
+        porch.mkdirs();
+        String[] pn = {"0 Lead Vocals.wav", "1 Backing Vocals.wav", "2 Drums.wav", "3 Bass.wav", "4 Guitar.wav", "5 Keyboard.wav",
+            "6 Percussion.wav", "7 Strings.wav", "8 Synth.wav", "9 Brass.wav", "10 Woodwinds.wav"};
+        Audio[] pa = {v, backing, d, b, o, synth, perc, fx, synth, fx, o};
+        List<File> pf = new ArrayList<>();
+        for (int i = 0; i < pn.length; i++) { File f = new File(porch, pn[i]); StemFiles.writeFloat(f, pa[i]); pf.add(f); }
+        File pz = new File(dir, "The Porch Light's On for Me Stems.zip");
+        zeroSizeZip(pz, pf);
+        StemFiles.Loaded pl = StemFiles.load(List.of(pz));
+        ok(pl.title.equals("The Porch Light's On for Me"), "title from the ZIP's name when there is no full mix: \"" + pl.title + "\"");
+        ok(pl.notes.stream().noneMatch(x -> x.contains("full mix")) && "Lead Vocals + Backing Vocals".equals(pl.labels[Stems.VOCALS]),
+            "\"0 Lead Vocals.wav\" is kept as the lead vocal, not taken for a full mix: Vocals = " + pl.labels[Stems.VOCALS]);
+        ok(pl.count() == 6 && "Drums + Percussion".equals(pl.labels[Stems.DRUMS]) && "Strings + Synth + Brass + Woodwinds".equals(pl.labels[Stems.OTHER])
+            && "Keyboard".equals(pl.labels[Stems.PIANO]) && "Guitar".equals(pl.labels[Stems.GUITAR]) && "Bass".equals(pl.labels[Stems.BASS]),
+            "all eleven placed: Drums = " + pl.labels[Stems.DRUMS] + ", Other = " + pl.labels[Stems.OTHER] + ", Piano = " + pl.labels[Stems.PIANO]);
+        Audio all = Stems.mix(pl.set, null, null);
+        double vsAll = 0;
+        for (int i = 0; i < n; i++) {
+            double want = 0;
+            for (Audio x : pa) want += x.l[i];
+            vsAll = Math.max(vsAll, Math.abs(all.l[i] - want));
+        }
+        ok(vsAll < 1e-5, String.format(Locale.US, "every one of the eleven files is in the mix once (worst %.1e)", vsAll));
+        pl.discard();
+        StemFiles.Loaded folder = StemFiles.load(pf);
+        ok(folder.title.equals("porch") && folder.count() == 6, "picked from an unzipped folder: the folder names it (\"" + folder.title + "\")");
+        folder.discard();
+
         // An instrumental-free-of-bass set: silence stands in, gets no level, and the round still masters.
         List<File> noBass = new ArrayList<>(files);
         noBass.removeIf(f -> f.getName().startsWith("4 "));

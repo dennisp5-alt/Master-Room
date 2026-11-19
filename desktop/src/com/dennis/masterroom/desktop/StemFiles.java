@@ -89,6 +89,12 @@ final class StemFiles {
         return best;
     }
 
+    /** "The Porch Light's On for Me Stems" → "The Porch Light's On for Me". */
+    static String cleanTitle(String s) {
+        String t = s.replaceAll("(?i)[\\s_-]*\\(?stems?\\)?$", "").replace('_', ' ').trim();
+        return t.isEmpty() ? s : t;
+    }
+
     /** "6 Backing_Vocals.wav" → "Backing Vocals"; "Song - Vocals.wav" → "Vocals". */
     static String label(String name, String title) {
         String s = name.replaceAll("(?i)\\.wav$", "").replace('_', ' ').replaceAll("^\\d+[\\s.-]+", "").trim();
@@ -107,23 +113,24 @@ final class StemFiles {
             for (File f : picked) {
                 if (isZip(f)) {
                     if (temp == null) temp = Files.createTempDirectory("masterroom-stems").toFile();
-                    zipTitle = f.getName().replaceAll("(?i)\\.zip$", "").replaceAll("(?i)[\\s_-]*stems?$", "").trim();
+                    zipTitle = cleanTitle(f.getName().replaceAll("(?i)\\.zip$", ""));
                     items.addAll(unzip(f, temp));
                 } else {
                     if (!f.getName().toLowerCase(Locale.ROOT).endsWith(".wav")) throw new IOException(f.getName() + " is not a WAV. Stems need to be WAV files (or a ZIP of them)");
                     items.add(new Item(f, f.getName()));
-                    if (folderTitle == null && f.getParentFile() != null) folderTitle = f.getParentFile().getName();
+                    if (folderTitle == null && f.getParentFile() != null) folderTitle = cleanTitle(f.getParentFile().getName());
                 }
             }
             if (items.isEmpty()) throw new IOException("No WAV stems found");
 
-            // Suno's download numbers its files and puts the full mix first ("0 Song Name.wav").
+            // Suno numbers its files. Some downloads start with the full mix ("0 Song Name.wav"); others start
+            // with a stem ("0 Lead Vocals.wav"). Only a number-0 file that names no stem is the full mix.
             boolean numbered = items.size() > 1 && items.stream().allMatch(i -> NUMBERED.matcher(i.name()).matches());
             String title = null;
             List<String> notes = new ArrayList<>();
             Map<Integer, List<Item>> parts = new LinkedHashMap<>();
             for (Item it : items) {
-                if (numbered && it.name().matches("^0[\\s_.-]+.*")) {
+                if (numbered && it.name().matches("^0[\\s_.-]+.*") && partFor(it.name()) < 0) {
                     title = it.name().replaceAll("(?i)\\.wav$", "").replaceAll("^0[\\s_.-]+", "").trim();
                     notes.add("Left out the full mix (" + it.name() + "), so it is not added on top of the stems");
                     continue;
@@ -133,7 +140,8 @@ final class StemFiles {
                 parts.computeIfAbsent(part, k -> new ArrayList<>()).add(it);
             }
             if (parts.isEmpty()) throw new IOException("No stems found, only a full mix");
-            if (title == null) {
+            // A numbered set's names hold no song title ("1 Backing Vocals"), so the ZIP or folder names it.
+            if (title == null && !numbered) {
                 for (List<Item> list : parts.values()) {
                     String t = Stems.titleOf(list.get(0).name()).replaceAll("^\\d+[\\s_.-]*", "").replaceAll("[\\s(\\[_.-]+$", "").trim();
                     if (!t.isEmpty() && !t.equals("Stems") && !t.matches("\\d+")) { title = t; break; }
