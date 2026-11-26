@@ -155,7 +155,7 @@ public final class Stems {
                 Audio a = Wav.read(set.files[part]);
                 if (part == VOCALS && tune != null && tune != VocalTune.Mode.OFF) {
                     p.at("Vocal Tune: following the pitch of the vocal", 1);
-                    VocalTune.Result tuned = VocalTune.tune(a, tune);
+                    VocalTune.Result tuned = VocalTune.tune(a, tune, true);
                     a = tuned.audio;
                     said.add(tuned.words());
                 }

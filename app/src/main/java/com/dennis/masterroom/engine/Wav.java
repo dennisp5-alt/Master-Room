@@ -167,6 +167,18 @@ public final class Wav {
     }
 
     private static void ascii(DataOutputStream d, String s) throws IOException { d.writeBytes(s); }
+    /** Stereo 32-bit IEEE float WAV: nothing rounded or clipped (Vocal Tune's output). */
+    public static void writeFloat(File f, Audio a) throws IOException {
+        int frames = a.frames();
+        long data = (long) frames * 8;
+        try (DataOutputStream d = new DataOutputStream(new java.io.BufferedOutputStream(new java.io.FileOutputStream(f), 1 << 16))) {
+            d.writeBytes("RIFF"); le32(d, 36 + data); d.writeBytes("WAVE");
+            d.writeBytes("fmt "); le32(d, 16); le16(d, 3); le16(d, 2); le32(d, a.rate); le32(d, (long) a.rate * 8); le16(d, 8); le16(d, 32);
+            d.writeBytes("data"); le32(d, data);
+            for (int i = 0; i < frames; i++) { le32(d, Float.floatToRawIntBits(a.l[i]) & 0xFFFFFFFFL); le32(d, Float.floatToRawIntBits(a.r[i]) & 0xFFFFFFFFL); }
+        }
+    }
+
     private static void le16(DataOutputStream d, int v) throws IOException { d.write(v); d.write(v >> 8); }
     private static void le32(DataOutputStream d, long v) throws IOException { d.write((int) v); d.write((int) (v >> 8)); d.write((int) (v >> 16)); d.write((int) (v >> 24)); }
     private static boolean tag(byte[] b, int p, String t) { for (int i = 0; i < 4; i++) if (b[p + i] != t.charAt(i)) return false; return true; }

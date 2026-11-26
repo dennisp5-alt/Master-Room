@@ -3,10 +3,10 @@ name: Master Room trial APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'design/studio-console-premium-v1', 'design/studio-console-v2-compact']
+    branches: [main, 'design/studio-console-premium-v1', 'design/studio-console-v2-compact', 'feature/vocal-tune-android']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -33,7 +33,11 @@ jobs:
           java -Xmx300m -Xmn8m -XX:+UseSerialGC -cp build/host MemoryCheck -14 | tee memory.txt
           java -Xmx300m -Xmn8m -XX:+UseSerialGC -cp build/host MemoryCheck -10 | tee -a memory.txt
           java -Xmx300m -Xmn8m -XX:+UseSerialGC -cp build/host MemoryCheck -14 stems | tee -a memory.txt
-          test "$(grep -c MEMORY_CHECK_PASS memory.txt)" = 3
+          java -Xmx300m -Xmn8m -XX:+UseSerialGC -cp build/host MemoryCheck -14 tune | tee -a memory.txt
+          test "$(grep -c MEMORY_CHECK_PASS memory.txt)" = 4
+          # Vocal Tune: detuned singing is pulled in, in-tune singing, harmonies and full mixes are left alone.
+          javac -nowarn -cp build/host -d build/host desktop/check/com/dennis/masterroom/engine/VocalTuneProbe.java desktop/check/VocalTuneCheck.java
+          java -Xmx2g -cp build/host VocalTuneCheck
       - name: Fetch fonts
         run: bash tools/fetch_fonts.sh
       - name: Build APK
@@ -43,3 +47,18 @@ jobs:
           name: MasterRoom-trial-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+      - name: Publish trial download
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(sed -n "s/.*versionName '\(.*\)'.*/\1/p" app/build.gradle)
+          TAG="android-v$VERSION"
+          cp app/build/outputs/apk/debug/*.apk "MasterRoom-$VERSION.apk"
+          NOTES="Master Room for Android $VERSION (trial, test-signed). Built from ${GITHUB_REF_NAME} at ${GITHUB_SHA::7}. Download the .apk below on the phone and open it to install."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "MasterRoom-$VERSION.apk" --clobber
+            gh release edit "$TAG" --notes "$NOTES" --prerelease
+          else
+            gh release create "$TAG" "MasterRoom-$VERSION.apk" --title "Master Room Android $VERSION" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+          fi

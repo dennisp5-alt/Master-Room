@@ -46,6 +46,7 @@ import com.dennis.masterroom.engine.Stems;
 import com.dennis.masterroom.engine.Streaming;
 import com.dennis.masterroom.engine.Target;
 import com.dennis.masterroom.engine.Taste;
+import com.dennis.masterroom.engine.VocalTune;
 import com.dennis.masterroom.engine.Wav;
 
 import java.io.BufferedReader;
@@ -68,7 +69,7 @@ import java.util.function.Consumer;
 
 /** Session screen: load, choose, master. Compare screen: listen, decide, save. */
 public final class MainActivity extends Activity {
-    private static final int PICK_SONG = 1, PICK_REFERENCE = 2, PICK_MASTER = 3, PICK_STEMS = 4;
+    private static final int PICK_SONG = 1, PICK_REFERENCE = 2, PICK_MASTER = 3, PICK_STEMS = 4, PICK_VOCAL = 5;
     private static final int BARS = 120, BLIND_OFF = 0, BLIND_ON = 1, BLIND_RESULTS = 2;
     private static final double[] LEVELS = {-14, -12, -11, -10};
     private static final String[] STAGES = {"EQ", "DYN", "COMP", "TONE", "CLIP", "LIMIT"};
@@ -144,6 +145,9 @@ public final class MainActivity extends Activity {
     private static double[] targetMid;
     private static File sessionDir;
     private static boolean commercial, cleanUpOn = true;
+    /** Vocal Tune on the vocal stem when mastering stems, and for TUNE VOCAL. */
+    private static VocalTune.Mode vocalTune = VocalTune.Mode.NATURAL;
+    private static AbPlayer tunePlayer;
     /** The settings behind the newest takes, and the song they came from. */
     private static String roundLabel = "", masteredSong;
     private static double refPunch = Double.NaN, refWidth = Double.NaN, refLow = Double.NaN;
@@ -181,6 +185,7 @@ public final class MainActivity extends Activity {
         } catch (IllegalArgumentException ignored) { }
         commercial = getSharedPreferences("choices", MODE_PRIVATE).getBoolean("commercial", false);
         cleanUpOn = getSharedPreferences("choices", MODE_PRIVATE).getBoolean("cleanUp", true);
+        try { vocalTune = VocalTune.Mode.valueOf(getSharedPreferences("choices", MODE_PRIVATE).getString("vocalTune", "NATURAL")); } catch (IllegalArgumentException ignored) { }
         if (Streaming.phoneCodec == null) Streaming.phoneCodec = new AacCodec();
         app = getApplicationContext();
         current = this;
@@ -565,6 +570,21 @@ public final class MainActivity extends Activity {
         clean.addView(parts.segment("Clean-up off", !cleanUpOn, Look.strong, v -> setChoice("cleanUp", false)));
         strengthRow.addView(tone, Parts.line(Look.dp(48), 0));
         strengthRow.addView(clean, Parts.line(Look.dp(48), 6));
+        // Vocal Tune: used on the vocal stem when mastering stems, and by TUNE VOCAL.
+        LinearLayout tune = parts.row();
+        String[] names = {"Tune off", "Natural", "Firm", "Hard"};
+        VocalTune.Mode[] modes = VocalTune.Mode.values();
+        for (int i = 0; i < modes.length; i++) {
+            final VocalTune.Mode m = modes[i];
+            tune.addView(parts.segment(names[i], vocalTune == m, Look.strong, v -> setVocalTune(m)));
+        }
+        strengthRow.addView(tune, Parts.line(Look.dp(48), 6));
+    }
+
+    private void setVocalTune(VocalTune.Mode m) {
+        vocalTune = m;
+        getSharedPreferences("choices", MODE_PRIVATE).edit().putString("vocalTune", m.name()).apply();
+        drawStrength();
     }
 
     private void setChoice(String key, boolean on) {
@@ -593,6 +613,9 @@ public final class MainActivity extends Activity {
         stemLoad = parts.link("LOAD STEMS", v -> stemAction());
         Look.type(stemLoad, Look.label, 13, Look.AMBER);
         head.addView(stemLoad, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
+        Button tuneLink = parts.link("TUNE VOCAL", v -> pick(PICK_VOCAL));
+        Look.type(tuneLink, Look.label, 13, Look.AMBER);
+        head.addView(tuneLink, new LinearLayout.LayoutParams(Parts.WRAP, Look.dp(48)));
         box.addView(head);
         stemHint = parts.text("", Look.body, 11, Look.DIM);
         box.addView(stemHint);
@@ -1784,7 +1807,112 @@ public final class MainActivity extends Activity {
             addReference(uri);
         } else if (code == PICK_MASTER) {
             importMaster(uri);
+        } else if (code == PICK_VOCAL) {
+            tuneVocal(uri, nameOf(uri));
         }
+    }
+
+    // Vocal Tune ---------------------------------------------------------------
+
+    /** Tunes one vocal on its own: tuned copy to Download/Master Room, then Original against Tuned. */
+    private void tuneVocal(Uri uri, String name) {
+        if (working) return;
+        final VocalTune.Mode mode = vocalTune == VocalTune.Mode.OFF ? VocalTune.Mode.NATURAL : vocalTune;
+        working = true;
+        applyBusy();
+        player.pause();
+        statusLine.setText("Vocal Tune (" + mode.label + "): following the pitch of " + name + "…");
+        worker.execute(() -> {
+            try {
+                File dir = new File(app.getExternalFilesDir(null), "vocaltune");
+                if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Could not make a working folder");
+                deleteAll(dir);
+                Audio a = Decoder.open(app, uri);
+                Listen before = Listen.to(a);
+                File original = new File(dir, "original.wav");
+                Wav.writeFloat(original, a);
+                VocalTune.Result res = VocalTune.tune(a, mode, true);
+                File tuned = null;
+                Listen after = null;
+                if (res.changed) {
+                    tuned = new File(dir, safe(name) + " - tuned (" + mode.name().toLowerCase(Locale.US) + ").wav");
+                    Wav.writeFloat(tuned, res.audio);
+                    after = Listen.to(res.audio);
+                    store(tuned, "audio/wav");
+                }
+                a = null;
+                final File t = tuned;
+                final Listen b = before, af = after;
+                main.post(() -> {
+                    working = false;
+                    ui(x -> {
+                        x.applyBusy();
+                        x.statusLine.setText(res.changed ? "Vocal Tune: tuned copy saved to Download/Master Room" : "Vocal Tune: left as it came");
+                        x.showVocalTune(name, res, original, b, t, af);
+                    });
+                });
+            } catch (Throwable e) {
+                fail(e);
+            }
+        });
+    }
+
+    private static String safe(String s) { return s.replaceAll("[\\\\/:*?\"<>|]", "_").trim(); }
+
+    private void showVocalTune(String name, VocalTune.Result res, File original, Listen before, File tuned, Listen after) {
+        android.app.Dialog d = new android.app.Dialog(this);
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setBackgroundColor(Look.BG);
+        box.setPadding(Look.dp(18), Look.dp(16), Look.dp(18), Look.dp(12));
+        box.addView(parts.label("VOCAL TUNE · " + res.mode.label.toUpperCase(Locale.US)));
+        box.addView(parts.text(name, Look.strong, 16, Look.TEXT), Parts.line(Parts.WRAP, 6));
+        box.addView(parts.text(res.words(), Look.body, 14, Look.MID), Parts.line(Parts.WRAP, 8));
+        if (tunePlayer != null) { tunePlayer.close(); tunePlayer = null; }
+        if (tuned != null && after != null) {
+            AbPlayer ab = new AbPlayer();
+            tunePlayer = ab;
+            try {
+                ab.add(new AbPlayer.Version("Original", original, before.loudness.integrated, before.truePeakDb, false));
+                ab.add(new AbPlayer.Version("Tuned", tuned, after.loudness.integrated, after.truePeakDb, true));
+            } catch (IOException e) {
+                box.addView(parts.text("Could not open them to play: " + e.getMessage(), Look.body, 13, Look.AMBER));
+            }
+            ab.select(1);
+            LinearLayout pick = parts.row();
+            final Button[] seg = new Button[2];
+            final Button play = parts.link("PLAY", null);
+            seg[0] = parts.segment("Original", false, Look.strong, null);
+            seg[1] = parts.segment("Tuned", true, Look.strong, null);
+            View.OnClickListener choose = v -> {
+                int i = v == seg[0] ? 0 : 1;
+                ab.select(i);
+                for (int k = 0; k < 2; k++) {
+                    Look.type(seg[k], Look.strong, 16, k == i ? Look.WELL : Look.TEXT);
+                    Look.surface(seg[k], k == i ? Look.gold(9) : Look.shape(Look.RAISED, Look.LINE, 9));
+                }
+            };
+            seg[0].setOnClickListener(choose); seg[1].setOnClickListener(choose);
+            pick.addView(seg[0], Parts.share(Look.dp(48), 1, 0));
+            pick.addView(seg[1], Parts.share(Look.dp(48), 1, 6));
+            box.addView(pick, Parts.line(Look.dp(48), 14));
+            play.setOnClickListener(v -> {
+                if (ab.isPlaying()) { ab.pause(); play.setText("PLAY"); } else { ab.play(); play.setText("PAUSE"); }
+            });
+            Look.type(play, Look.label, 14, Look.AMBER);
+            box.addView(play, Parts.line(Look.dp(48), 6));
+            box.addView(parts.text("Both play at the same loudness, and switching keeps your place. Judge by ear: the numbers say what moved, not whether it sounds better.", Look.body, 12, Look.DIM), Parts.line(Parts.WRAP, 4));
+        }
+        Button close = parts.link("CLOSE", v -> d.dismiss());
+        Look.type(close, Look.label, 14, Look.MID);
+        box.addView(close, Parts.line(Look.dp(48), 10));
+        d.setOnDismissListener(x -> { if (tunePlayer != null) { tunePlayer.close(); tunePlayer = null; } });
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(box);
+        d.setContentView(scroll);
+        if (d.getWindow() != null) d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.92), android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        d.show();
     }
 
     private String nameOf(Uri uri) {
@@ -1973,7 +2101,7 @@ public final class MainActivity extends Activity {
                         rides = balance.rideDb;
                         options.stemNotes.add("Auto balance: " + balance.words());
                     }
-                    in = Stems.render(stems, levels, rides, stemsMuted, options.cleanUp, dir, options.stemNotes, bar);
+                    in = Stems.render(stems, levels, rides, stemsMuted, options.cleanUp, vocalTune, dir, options.stemNotes, bar);
                 }
                 Audio[] holder = {in};
                 in = null;

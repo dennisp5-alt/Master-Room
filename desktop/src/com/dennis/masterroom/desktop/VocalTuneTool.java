@@ -5,10 +5,7 @@ import com.dennis.masterroom.engine.Listen;
 import com.dennis.masterroom.engine.VocalTune;
 import com.dennis.masterroom.engine.Wav;
 
-import java.io.BufferedOutputStream;
-import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -61,18 +58,5 @@ final class VocalTuneTool {
         return d;
     }
 
-    /** Stereo 32-bit IEEE float WAV. */
-    static void writeFloat(File f, Audio a) throws IOException {
-        int frames = a.frames();
-        long data = (long) frames * 8;
-        try (DataOutputStream o = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(f), 1 << 16))) {
-            o.writeBytes("RIFF"); le32(o, 36 + data); o.writeBytes("WAVE");
-            o.writeBytes("fmt "); le32(o, 16); le16(o, 3); le16(o, 2); le32(o, a.rate); le32(o, (long) a.rate * 8); le16(o, 8); le16(o, 32);
-            o.writeBytes("data"); le32(o, data);
-            for (int i = 0; i < frames; i++) { le32(o, Float.floatToRawIntBits(a.l[i])); le32(o, Float.floatToRawIntBits(a.r[i])); }
-        }
-    }
-
-    private static void le16(DataOutputStream o, int v) throws IOException { o.write(v & 255); o.write((v >> 8) & 255); }
-    private static void le32(DataOutputStream o, long v) throws IOException { o.write((int) (v & 255)); o.write((int) ((v >> 8) & 255)); o.write((int) ((v >> 16) & 255)); o.write((int) ((v >> 24) & 255)); }
+    static void writeFloat(File f, Audio a) throws IOException { Wav.writeFloat(f, a); }
 }

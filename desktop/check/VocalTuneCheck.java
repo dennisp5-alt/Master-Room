@@ -41,6 +41,14 @@ public final class VocalTuneCheck {
         check("peak not raised by more than 0.5 dB", VocalTuneProbe.peakDb(r.audio) <= VocalTuneProbe.peakDb(sung) + 0.5);
         check("formants kept (spectral centroid within 8%)", Math.abs(VocalTuneProbe.centroid(r.audio) / VocalTuneProbe.centroid(sung) - 1) < 0.08);
 
+        // 1b. In place (the stems path and the phone) gives the same result, written into the same arrays.
+        Audio again = new Audio(sung.l.clone(), sung.r.clone(), rate);
+        VocalTune.Result ip = VocalTune.tune(again, VocalTune.Mode.NATURAL, true);
+        double worst = 0;
+        for (int i = 0; i < again.frames(); i++) worst = Math.max(worst, Math.abs(ip.audio.l[i] - r.audio.l[i]));
+        System.out.printf(Locale.US, "  in place vs copy: worst difference %.1e%n", worst);
+        check("in place: same arrays, same result (within -60 dB)", ip.audio == again && worst < 1e-3);
+
         // 2. Firm moves further than Natural.
         VocalTune.Result firm = VocalTune.tune(sung, VocalTune.Mode.FIRM);
         double[] fa = VocalTuneProbe.noteCents(firm.audio, off);

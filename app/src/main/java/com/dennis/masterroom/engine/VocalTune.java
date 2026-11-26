@@ -85,7 +85,13 @@ public final class VocalTune {
 
     private VocalTune() {}
 
-    public static Result tune(Audio in, Mode mode) {
+    public static Result tune(Audio in, Mode mode) { return tune(in, mode, false); }
+
+    /**
+     * @param inPlace write the result into the given audio instead of a copy (the stems path and the phone, where
+     *                memory is tight). The result's audio is then the same object, changed.
+     */
+    public static Result tune(Audio in, Mode mode, boolean inPlace) {
         Result res = new Result();
         res.mode = mode; res.audio = in;
         if (mode == Mode.OFF) { res.reason = "off"; return res; }
@@ -118,7 +124,7 @@ public final class VocalTune {
                     : "every note was already inside the dead band, so it was left untouched.";
             return res;
         }
-        res.audio = shift(in, t, move);
+        res.audio = shift(in, t, move, inPlace);
         res.changed = true;
         Track after = follow(res.audio);
         double[] afterOff = offsets(centres(after, mode.keepVibrato ? VIBRATO_SECONDS : 0.0), scale);
@@ -423,13 +429,8 @@ public final class VocalTune {
 
     // ---------------------------------------------------------------- pitch shifting (TD-PSOLA)
 
-    static Audio shift(Audio in, Track t, double[] move) {
-        int n = in.frames();
-        float[] l = in.l.clone(), r = in.r.clone();
-        // A gently low-passed mono copy marks the pitch periods (peaks are steadier below 900 Hz).
-        float[] mark = new float[n];
-        double lp = 0, a = 1 - Math.exp(-2 * Math.PI * 900.0 / in.rate);
-        for (int i = 0; i < n; i++) { lp += a * (0.5 * (in.l[i] + in.r[i]) - lp); mark[i] = (float) lp; }
+    static Audio shift(Audio in, Track t, double[] move, boolean inPlace) {
+        float[] l = inPlace ? in.l : in.l.clone(), r = inPlace ? in.r : in.r.clone();
         int fades = Math.max(1, (int) Math.round(0.01 * in.rate));
         int frames = t.frames();
         for (int f = 0; f < frames; ) {
@@ -439,11 +440,11 @@ public final class VocalTune {
             while (g < frames && !Double.isNaN(t.midi[g])) { if (move[g] != 0) moves = true; g++; }
             if (moves) {
                 Engineer.checkStop();
-                run(in, l, r, mark, t, move, f, g, fades);
+                run(in.l, in.r, l, r, t, move, f, g, fades);
             }
             f = g;
         }
-        return new Audio(l, r, in.rate);
+        return inPlace ? in : new Audio(l, r, in.rate);
     }
 
     private static double period(Track t, int sample) {
@@ -464,56 +465,64 @@ public final class VocalTune {
         return Math.pow(2, move[f] / 12);
     }
 
-    /** One sung phrase, frames [f, g): analysis marks on the pitch peaks, then grains re-spaced. */
-    private static void run(Audio in, float[] l, float[] r, float[] mark, Track t, double[] move, int f, int g, int fades) {
-        int n = in.frames();
+    /**
+     * One sung phrase, frames [f, g): analysis marks on the pitch peaks, then grains re-spaced. Grains are read from a
+     * copy of just this phrase (plus a period either side), so the result can be written straight back.
+     */
+    private static void run(float[] inL, float[] inR, float[] l, float[] r, Track t, double[] move, int f, int g, int fades) {
+        int n = inL.length;
         int start = f * t.hop, end = Math.min(n, g * t.hop + t.hop);
         if (end - start < 4 * fades) return;
-        // Analysis marks.
+        int pad = (int) Math.ceil(t.rate / LOW_HZ) + 2;
+        int from = Math.max(0, start - pad), to = Math.min(n, end + pad);
+        float[] srcL = Arrays.copyOfRange(inL, from, to), srcR = Arrays.copyOfRange(inR, from, to);
+        // A gently low-passed mono copy marks the pitch periods (peaks are steadier below 900 Hz).
+        float[] mark = new float[to - from];
+        double lp = 0, a = 1 - Math.exp(-2 * Math.PI * 900.0 / t.rate);
+        for (int i = 0; i < mark.length; i++) { lp += a * (0.5 * (srcL[i] + srcR[i]) - lp); mark[i] = (float) lp; }
+        // Analysis marks, in phrase-copy coordinates.
         int[] marks = new int[Math.max(16, (int) ((end - start) / (t.rate / HIGH_HZ)) + 4)];
         int count = 0;
         double p0 = period(t, start);
-        int m0 = peak(mark, start, (int) Math.min(n - 1, start + p0));
-        marks[count++] = m0;
+        marks[count++] = peak(mark, start - from, (int) Math.min(mark.length - 1, start - from + p0));
         while (true) {
             int last = marks[count - 1];
-            double p = period(t, last);
+            double p = period(t, last + from);
             int lo = (int) (last + p - p / 4), hi = (int) (last + p + p / 4);
-            if (hi >= end || hi >= n) break;
+            if (hi + from >= end || hi >= mark.length) break;
             int next = peak(mark, Math.max(last + 1, lo), hi);
             if (count == marks.length) marks = Arrays.copyOf(marks, count * 2);
             marks[count++] = next;
         }
         if (count < 3) return;
-        float[] outL = new float[end - start], outR = new float[end - start];
-        double[] weight = new double[end - start];
-        double u = marks[0];
+        int len = end - start;
+        float[] outL = new float[len], outR = new float[len];
+        double[] weight = new double[len];
+        double u = marks[0] + from;
         int k = 0;
         while (u < end) {
             int ui = (int) Math.round(u);
-            while (k + 1 < count && Math.abs(marks[k + 1] - ui) <= Math.abs(marks[k] - ui)) k++;
+            while (k + 1 < count && Math.abs(marks[k + 1] + from - ui) <= Math.abs(marks[k] + from - ui)) k++;
             int c = marks[k];
-            int half = (int) Math.round(period(t, c));
+            int half = (int) Math.round(period(t, c + from));
             for (int i = -half; i <= half; i++) {
                 int src = c + i, dst = ui + i - start;
-                if (src < 0 || src >= n || dst < 0 || dst >= outL.length) continue;
+                if (src < 0 || src >= srcL.length || dst < 0 || dst >= len) continue;
                 double w = 0.5 + 0.5 * Math.cos(Math.PI * i / (half + 1));
-                outL[dst] += (float) (w * in.l[src]);
-                outR[dst] += (float) (w * in.r[src]);
+                outL[dst] += (float) (w * srcL[src]);
+                outR[dst] += (float) (w * srcR[src]);
                 weight[dst] += w;
             }
             u += period(t, ui) / ratioAt(t, move, ui);
         }
         // Blend back into the original at the phrase edges; normalise the overlap.
-        int len = end - start;
         for (int i = 0; i < len; i++) {
             double w = weight[i];
             if (w < 0.3) continue;
             double edge = Math.min(1, Math.min(i, len - 1 - i) / (double) fades);
-            double sl = outL[i] / w, sr = outR[i] / w;
-            int at = start + i;
-            l[at] = (float) (in.l[at] + edge * (sl - in.l[at]));
-            r[at] = (float) (in.r[at] + edge * (sr - in.r[at]));
+            int at = start + i, s0 = at - from;
+            l[at] = (float) (srcL[s0] + edge * (outL[i] / w - srcL[s0]));
+            r[at] = (float) (srcR[s0] + edge * (outR[i] / w - srcR[s0]));
         }
     }
 
