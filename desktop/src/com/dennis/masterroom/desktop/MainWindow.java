@@ -7,6 +7,7 @@ import com.dennis.masterroom.engine.Release;
 import com.dennis.masterroom.engine.Spectrum;
 import com.dennis.masterroom.engine.Stems;
 import com.dennis.masterroom.engine.Target;
+import com.dennis.masterroom.engine.VocalTune;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
@@ -49,6 +50,8 @@ final class MainWindow {
     private final JCheckBox commercial = check("Commercial reference", "Aim the tone at current commercial releases rather than the gentler built-in curve");
     private final JCheckBox cleanUp = check("Clean-up", "Turns down narrow resonances while they ring and eases stray top-end specks");
     private final JCheckBox mp3 = check("MP3 320", "Also writes a tagged 320 kbps MP3 of each take");
+    private final JComboBox<VocalTune.Mode> vocalTune = new JComboBox<>(VocalTune.Mode.values());
+    private final JButton tuneVocal = button("Tune vocal", false);
     private final JButton open = button("Open song", false), openStems = button("Open stems", false), master = button("Master", true), stop = button("Stop", false);
     private final JButton folder = button("Open folder", false), sheet = button("Session sheet", false), saveTo = button("Change", false);
     private final JLabel saveLine = text("", Look.size(Look.body, 13), Look.DIM);
@@ -154,7 +157,16 @@ final class MainWindow {
         root.add(centre, BorderLayout.CENTER);
 
         for (double d : LEVELS) level.addItem(String.format(Locale.US, "%.0f LUFS", d));
-        styleCombo(style); styleCombo(level);
+        styleCombo(style); styleCombo(level); styleCombo(vocalTune);
+        vocalTune.setToolTipText("Gentle pitch correction on the vocal stem when mastering stems, and for Tune vocal. In-tune singing and harmonies are left alone.");
+        vocalTune.setRenderer(new DefaultListCellRenderer() {
+            @Override public Component getListCellRendererComponent(JList<?> l, Object v, int i, boolean sel, boolean f) {
+                super.getListCellRendererComponent(l, v instanceof VocalTune.Mode m ? m.label : v, i, sel, f);
+                setBackground(sel ? Look.PANEL_TOP : Look.PANEL); setForeground(sel ? Look.AMBER : Look.TEXT);
+                setFont(Look.size(Look.body, 14)); setBorder(new EmptyBorder(4, 8, 4, 8));
+                return this;
+            }
+        });
         style.setRenderer(new DefaultListCellRenderer() {
             @Override public Component getListCellRendererComponent(JList<?> l, Object v, int i, boolean sel, boolean f) {
                 super.getListCellRendererComponent(l, v instanceof Target.Style s ? s.label : v, i, sel, f);
@@ -177,6 +189,8 @@ final class MainWindow {
         stop.setEnabled(false); folder.setEnabled(false); sheet.setEnabled(false); master.setEnabled(false);
         open.addActionListener(e -> choose());
         openStems.addActionListener(e -> chooseStems());
+        tuneVocal.addActionListener(e -> chooseVocalToTune());
+        tuneVocal.setToolTipText("Pitch-correct a vocal on its own (a vocal stem or a dry vocal WAV), then compare it with the original");
         openStems.setToolTipText("Vocals, drums, bass and other (guitar and piano too), as WAVs or Stem Studio's ZIP");
         stemsTab.addActionListener(e -> showBench(true));
         takesTab.addActionListener(e -> showBench(false));
@@ -228,7 +242,7 @@ final class MainWindow {
     private JComponent header() {
         JPanel h = row();
         JLabel t = text("MASTER ROOM", Look.size(Look.title, 30), Look.AMBER);
-        JLabel s = text("   Windows trial · build 6 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
+        JLabel s = text("   Windows trial · build 7 · same engine as the phone", Look.size(Look.label, 15), Look.DIM);
         h.add(t); h.add(s); h.add(Box.createHorizontalGlue()); h.add(engineLine);
         h.setBorder(new EmptyBorder(0, 0, 14, 0));
         return h;
@@ -240,7 +254,7 @@ final class MainWindow {
         words.add(text("SONG", Look.size(Look.label, 13), Look.AMBER_DIM));
         words.add(gap(4)); words.add(songName); words.add(gap(4)); words.add(songFacts);
         p.add(words, BorderLayout.CENTER);
-        JPanel side = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0)); side.setOpaque(false); side.add(open); side.add(openStems);
+        JPanel side = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0)); side.setOpaque(false); side.add(open); side.add(openStems); side.add(tuneVocal);
         p.add(side, BorderLayout.EAST);
         return p;
     }
@@ -251,10 +265,12 @@ final class MainWindow {
         GridBagConstraints c = new GridBagConstraints(); c.anchor = GridBagConstraints.WEST; c.insets = new Insets(0, 0, 6, 18);
         c.gridx = 0; c.gridy = 0; grid.add(text("STYLE", Look.size(Look.label, 13), Look.AMBER_DIM), c);
         c.gridx = 1; grid.add(text("LOUDNESS", Look.size(Look.label, 13), Look.AMBER_DIM), c);
+        c.gridx = 5; grid.add(text("VOCAL TUNE", Look.size(Look.label, 13), Look.AMBER_DIM), c);
         c.gridx = 0; c.gridy = 1; style.setPreferredSize(new Dimension(230, 34)); grid.add(style, c);
         c.gridx = 1; level.setPreferredSize(new Dimension(130, 34)); grid.add(level, c);
         c.gridx = 2; grid.add(commercial, c); c.gridx = 3; grid.add(cleanUp, c); c.gridx = 4; grid.add(mp3, c);
-        c.gridx = 5; c.weightx = 1; grid.add(Box.createHorizontalGlue(), c);
+        c.gridx = 5; vocalTune.setPreferredSize(new Dimension(190, 34)); grid.add(vocalTune, c);
+        c.gridx = 6; c.weightx = 1; grid.add(Box.createHorizontalGlue(), c);
         p.add(grid, BorderLayout.CENTER);
         return p;
     }
@@ -281,7 +297,7 @@ final class MainWindow {
         saveTake.setPreferredSize(new Dimension(120, 40)); saveTake.setMaximumSize(saveTake.getPreferredSize());
         saveTake.setToolTipText("Save the selected take as release files, with the song's details written in");
         r.add(Box.createHorizontalStrut(10)); r.add(saveTake);
-        for (AbstractButton b : new AbstractButton[]{play, blindTest, match, open, master, stop, folder, sheet, saveTo, commercial, cleanUp, mp3, refsBtn, saveTake}) b.setFocusable(false);
+        for (AbstractButton b : new AbstractButton[]{play, blindTest, match, open, master, stop, folder, sheet, saveTo, commercial, cleanUp, mp3, refsBtn, saveTake, tuneVocal}) b.setFocusable(false);
         return r;
     }
 
@@ -669,6 +685,7 @@ final class MainWindow {
         MasterJob.Settings s = new MasterJob.Settings();
         s.song = song; s.style = (Target.Style) style.getSelectedItem(); s.lufs = LEVELS[level.getSelectedIndex()];
         s.commercial = commercial.isSelected(); s.cleanUp = cleanUp.isSelected(); s.mp3 = mp3.isSelected();
+        s.vocalTune = (VocalTune.Mode) vocalTune.getSelectedItem();
         s.outRoot = outRoot;
         boolean ownTone = Library.albumRecords().size() > 0 || !Library.records(s.style).isEmpty();
         s.target = ownTone ? Library.target(s.style, s.commercial) : null;
@@ -805,6 +822,7 @@ final class MainWindow {
         stemsTab.setEnabled(!on); takesTab.setEnabled(!on);
         stemsView.draw();
         style.setEnabled(!on); level.setEnabled(!on); commercial.setEnabled(!on); cleanUp.setEnabled(!on); mp3.setEnabled(!on);
+        vocalTune.setEnabled(!on); tuneVocal.setEnabled(!on);
     }
 
     // ---------- Listening ----------
@@ -1041,16 +1059,107 @@ final class MainWindow {
         String chosen = PREFS.get("outRoot", "");
         setOutRoot(!chosen.isEmpty() && new File(chosen).isDirectory() ? new File(chosen) : MasterJob.defaultOutRoot());
         commercial.setSelected(PREFS.getBoolean("commercial", false)); cleanUp.setSelected(PREFS.getBoolean("cleanUp", true)); mp3.setSelected(PREFS.getBoolean("mp3", true));
+        try { vocalTune.setSelectedItem(VocalTune.Mode.valueOf(PREFS.get("vocalTune", "NATURAL"))); } catch (Exception e) { vocalTune.setSelectedItem(VocalTune.Mode.NATURAL); }
     }
 
     private void save() {
         PREFS.put("style", ((Target.Style) style.getSelectedItem()).name()); PREFS.putDouble("level", LEVELS[level.getSelectedIndex()]);
         PREFS.putBoolean("commercial", commercial.isSelected()); PREFS.putBoolean("cleanUp", cleanUp.isSelected()); PREFS.putBoolean("mp3", mp3.isSelected());
+        PREFS.put("vocalTune", ((VocalTune.Mode) vocalTune.getSelectedItem()).name());
     }
 
     static String rootMessage(Throwable e) {
         while (e.getCause() != null) e = e.getCause();
         return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+    }
+
+    // ---------- Vocal Tune ----------
+    private void chooseVocalToTune() {
+        if (busy) return;
+        JFileChooser fc = new JFileChooser(PREFS.get("lastDir", System.getProperty("user.home")));
+        fc.setDialogTitle("Tune vocal: a vocal on its own (vocal stem or dry vocal WAV)");
+        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Audio (" + String.join(", ", MasterJob.READS) + ")", MasterJob.READS));
+        if (fc.showOpenDialog(root) != JFileChooser.APPROVE_OPTION || fc.getSelectedFile() == null) return;
+        File in = fc.getSelectedFile();
+        PREFS.put("lastDir", in.getParent() == null ? "" : in.getParent());
+        save();
+        VocalTune.Mode mode = (VocalTune.Mode) vocalTune.getSelectedItem();
+        if (mode == VocalTune.Mode.OFF) mode = VocalTune.Mode.NATURAL;
+        final VocalTune.Mode use = mode;
+        player.pause();
+        setBusy(true);
+        progress.setIndeterminate(true);
+        status.setText("Vocal Tune (" + use.label + "): following the pitch of " + in.getName() + "…");
+        new SwingWorker<VocalTuneTool.Done, Void>() {
+            @Override protected VocalTuneTool.Done doInBackground() throws Exception { return VocalTuneTool.run(in, use, outRoot); }
+            @Override protected void done() {
+                progress.setIndeterminate(false);
+                setBusy(false);
+                try {
+                    VocalTuneTool.Done d = get();
+                    status.setText(d.result.changed ? "Vocal Tune: tuned file saved in " + d.folder.getName() : "Vocal Tune: left as it came");
+                    showVocalTune(in, d);
+                } catch (Exception e) {
+                    status.setText("Vocal Tune could not finish: " + rootMessage(e));
+                }
+            }
+        }.execute();
+    }
+
+    /** The report, and Original against Tuned on their own player (level-matched, switch keeps your place). */
+    private void showVocalTune(File in, VocalTuneTool.Done d) {
+        JDialog dlg = new JDialog(SwingUtilities.getWindowAncestor(root), "Vocal Tune", Dialog.ModalityType.APPLICATION_MODAL);
+        JPanel body = column();
+        body.setBorder(new EmptyBorder(18, 20, 16, 20));
+        JPanel shell = new JPanel(new BorderLayout()); shell.setBackground(Look.BG); shell.add(body, BorderLayout.CENTER);
+        dlg.setContentPane(shell);
+        body.add(text("VOCAL TUNE  ·  " + d.result.mode.label.toUpperCase(Locale.ROOT), Look.size(Look.label, 13), Look.AMBER_DIM));
+        body.add(gap(6));
+        body.add(text(in.getName(), Look.size(Look.strong, 16), Look.TEXT));
+        body.add(gap(10));
+        String words = d.result.words().replace("&", "&amp;").replace("<", "&lt;");
+        body.add(text("<html><div style='width:520px'>" + words + "</div></html>", Look.size(Look.body, 14), Look.MID));
+        body.add(gap(14));
+        AbPlayer ab = new AbPlayer();
+        if (d.tuned != null) {
+            JButton orig = segment("ORIGINAL"), tuned = segment("TUNED");
+            JButton playBtn = button("Play", false);
+            JCheckBox matched = check("Level match", "Plays both at the same loudness, so you hear the tuning, not a level change");
+            matched.setSelected(true);
+            try {
+                ab.mix.add(new AbMixer.Version("Original", d.original, d.originalLufs, d.originalPeak, false));
+                ab.mix.add(new AbMixer.Version("Tuned", d.tuned, d.tunedLufs, d.tunedPeak, true));
+            } catch (Exception e) { body.add(text("Could not open the files to play: " + rootMessage(e), Look.size(Look.body, 13), Look.AMBER)); }
+            orig.putClientProperty("on", Boolean.FALSE); tuned.putClientProperty("on", Boolean.TRUE);
+            ab.mix.select(1);
+            orig.addActionListener(e -> { ab.mix.select(0); orig.putClientProperty("on", true); tuned.putClientProperty("on", false); orig.repaint(); tuned.repaint(); });
+            tuned.addActionListener(e -> { ab.mix.select(1); orig.putClientProperty("on", false); tuned.putClientProperty("on", true); orig.repaint(); tuned.repaint(); });
+            playBtn.addActionListener(e -> {
+                if (ab.isPlaying()) { ab.pause(); playBtn.setText("Play"); }
+                else { ab.play(); playBtn.setText("Pause"); }
+            });
+            ab.onStop(() -> SwingUtilities.invokeLater(() -> playBtn.setText("Play")));
+            matched.addActionListener(e -> ab.mix.setMatched(matched.isSelected()));
+            JPanel r = row();
+            r.add(orig); r.add(Box.createHorizontalStrut(8)); r.add(tuned); r.add(Box.createHorizontalStrut(14)); r.add(playBtn); r.add(Box.createHorizontalStrut(14)); r.add(matched);
+            body.add(r);
+            body.add(gap(8));
+            body.add(text("<html><div style='width:520px'>Switching keeps your place. Judge by ear: the numbers say what moved, not whether it sounds better.</div></html>", Look.size(Look.body, 12), Look.DIM));
+            body.add(gap(14));
+        }
+        JPanel end = row();
+        JButton openFolder = button("Open folder", false), close = button("Close", false);
+        openFolder.addActionListener(e -> { try { Desktop.getDesktop().open(d.folder); } catch (Exception x) { status.setText("Could not open the folder: " + rootMessage(x)); } });
+        close.addActionListener(e -> dlg.dispose());
+        end.add(openFolder); end.add(Box.createHorizontalStrut(10)); end.add(close);
+        body.add(end);
+        dlg.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override public void windowClosed(java.awt.event.WindowEvent e) { ab.close(); }
+        });
+        dlg.pack();
+        dlg.setSize(Math.max(620, dlg.getWidth()), dlg.getHeight());
+        dlg.setLocationRelativeTo(root);
+        dlg.setVisible(true);
     }
 
     // ---------- Stems ----------

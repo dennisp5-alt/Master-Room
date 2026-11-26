@@ -103,3 +103,21 @@ and the jump3r MP3 code), compiled as plain Java; nothing in `app/` changes.
   on the phone. **+ COMPARE A MASTER** brings in a master made elsewhere (Stem Lab, another tool), converted to the
   song's sample rate if needed, measured like the takes and played level-matched with them. The app has its own
   icon (the console's loudness arc), on the window, the program and the installer.
+- **Build 7 (0.7.0), Vocal Tune:** gentle automatic pitch correction for a voice on its own (`engine/VocalTune.java`, shared with the
+  phone engine but used only by the Windows app for now; the phone's results are unchanged).
+  - **Where:** VOCAL TUNE next to MP3 320 (Off, Natural, Firm, Hard tune) applies to the vocal stem when mastering stems, before its
+    clean-up. **Tune vocal** (next to Open stems) tunes one file on its own: a vocal stem or a dry vocal WAV (any format the app
+    reads), writes `<name> - tuned (<setting>).wav` as 32-bit float with a short report in `<save folder>\<name>\Vocal Tune <date time>\`,
+    and opens Original against Tuned on their own level-matched player (switching keeps your place).
+  - **How:** follows the pitch (YIN), averages vibrato out to find each note's centre, and nudges a note towards the nearest
+    semitone only when it is more than the dead band out (Natural 12 cents, 60% of the way, 70 ms; Firm 8 cents, 85%, 35 ms),
+    so blue notes and slides are never moved to another note and vibrato stays. Hard tune snaps every moment to the key's
+    notes, as an effect. Pitch-synchronous overlap-add moves the pitch and keeps the formants; left and right get the same move.
+  - **Leaves alone:** singing already in tune (the same samples come back), stretches where more than one voice sings
+    (harmonies, doubles), and anything with too much besides one voice in it (a full mix, heavy bleed). The report says
+    which, and the result is measured again afterwards: notes nudged, typical move, share of sung time within 20 cents
+    before and after, and the key.
+  - CLI: `"Master Room CLI.exe" --tune vocal.wav [--vocal-tune natural|firm|effect] [--out folder]`, and `--vocal-tune` with `--master --stems`.
+  - `desktop/check/VocalTuneCheck.java` checks it on synthetic singing with known detuning: notes pulled in without passing the note,
+    vibrato and formants kept, in-tune singing untouched, harmonies and a full mix left alone, stereo balance kept, 48 kHz.
+

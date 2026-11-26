@@ -136,6 +136,11 @@ public final class Stems {
      * happened. Clean-up off leaves resonances and swirl alone but still tames harshness and esses.
      */
     public static Audio render(Set set, double[] levelDb, float[] rideDb, boolean[] muted, boolean clean, File work, List<String> notes, Engineer.Progress p) throws IOException {
+        return render(set, levelDb, rideDb, muted, clean, VocalTune.Mode.OFF, work, notes, p);
+    }
+
+    /** As above, with Vocal Tune on the vocal stem first (before its clean-up). Off gives exactly the same result. */
+    public static Audio render(Set set, double[] levelDb, float[] rideDb, boolean[] muted, boolean clean, VocalTune.Mode tune, File work, List<String> notes, Engineer.Progress p) throws IOException {
         boolean any = false;
         for (int part = 0; part < COUNT; part++) any |= set.has(part) && !muted[part];
         if (!any) throw new IOException("Every stem is muted");
@@ -148,6 +153,12 @@ public final class Stems {
                 Engineer.checkStop();
                 p.at("Cleaning the " + NAMES[part].toLowerCase(Locale.US) + " stem", part == VOCALS ? 1 : 3);
                 Audio a = Wav.read(set.files[part]);
+                if (part == VOCALS && tune != null && tune != VocalTune.Mode.OFF) {
+                    p.at("Vocal Tune: following the pitch of the vocal", 1);
+                    VocalTune.Result tuned = VocalTune.tune(a, tune);
+                    a = tuned.audio;
+                    said.add(tuned.words());
+                }
                 a = treat(a, part, clean, said);
                 sizes[part] = a.frames();
                 done[part] = new File(work, "stem" + part + ".raw");

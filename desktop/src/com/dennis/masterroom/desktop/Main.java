@@ -4,12 +4,12 @@ import javax.swing.*;
 import java.io.File;
 import java.util.Arrays;
 
-/** Master Room for Windows. No arguments: the window. --master: command line. --screenshot: a PNG of the window, for checks. */
+/** Master Room for Windows. No arguments: the window. --master or --tune: command line. --screenshot: a PNG of the window, for checks. */
 public final class Main {
     private Main() {}
 
     public static void main(String[] args) throws Exception {
-        if (Arrays.asList(args).contains("--master")) System.exit(Cli.run(args));
+        if (Arrays.asList(args).contains("--master") || Arrays.asList(args).contains("--tune")) System.exit(Cli.run(args));
         int shot = Arrays.asList(args).indexOf("--screenshot");
         if (shot >= 0) {
             System.setProperty("java.awt.headless", System.getProperty("java.awt.headless", "true"));

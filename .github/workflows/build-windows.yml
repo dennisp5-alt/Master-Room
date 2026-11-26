@@ -16,7 +16,7 @@ permissions:
   contents: write  # the trial download is published as a GitHub pre-release
 
 env:
-  APP_VERSION: '0.6.0'
+  APP_VERSION: '0.7.0'
   # FFmpeg LGPL builds by BtbN: the newest stable release branch (n<version>-latest-win64-lgpl), looked up at build time.
   # Only ffmpeg.exe and its licence are shipped.
   FFMPEG_REPO: 'BtbN/FFmpeg-Builds'
@@ -72,6 +72,11 @@ jobs:
         run: |
           java -Xmx3g -Dmasterroom.ffmpeg=build/desktop/app/ffmpeg/ffmpeg.exe -cp "build/desktop/classes;build/desktop/check" DesktopCheck 40 "check-song.wav" "check-stems.zip" | tee desktop-check.txt
           grep -q DESKTOP_CHECK_PASS desktop-check.txt
+
+      - name: Vocal Tune check (synthetic singing with known detuning, harmonies, a full mix, stereo, 48 kHz)
+        run: |
+          java -cp "build/desktop/classes;build/desktop/check" VocalTuneCheck | tee vocal-tune-check.txt
+          grep -q "VOCAL TUNE CHECK PASSED" vocal-tune-check.txt
 
       - name: Screenshots of the window (Windows fonts and rendering)
         run: |
