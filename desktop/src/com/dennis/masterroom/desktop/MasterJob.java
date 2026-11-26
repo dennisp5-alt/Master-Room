@@ -6,6 +6,7 @@ import com.dennis.masterroom.engine.Engineer;
 import com.dennis.masterroom.engine.Listen;
 import com.dennis.masterroom.engine.Release;
 import com.dennis.masterroom.engine.Stems;
+import com.dennis.masterroom.engine.VocalTune;
 import com.dennis.masterroom.engine.Streaming;
 import com.dennis.masterroom.engine.Target;
 import com.dennis.masterroom.engine.Wav;
@@ -31,6 +32,8 @@ public final class MasterJob {
         public Target.Style style = Target.Style.COUNTRY;
         public double lufs = -14;
         public boolean commercial = false, cleanUp = true, mp3 = true;
+        /** Vocal Tune on the vocal stem (stems only). Off unless chosen, so the phone's results are unchanged. */
+        public VocalTune.Mode vocalTune = VocalTune.Mode.OFF;
         /** Where rounds go: <outRoot>\<song>\<date time>\ */
         public File outRoot = defaultOutRoot();
         /** Stems instead of a song (build 4). The phone's choices: the app's own balance, or levels and mutes set by hand. */
@@ -221,7 +224,8 @@ public final class MasterJob {
     public static String describe(Settings s) {
         return s.style.label + " · " + String.format(Locale.US, "%.0f LUFS", s.lufs) + " · " + (s.commercial ? "commercial reference" : "built-in tone reference")
             + " · clean-up " + (s.cleanUp ? "on" : "off") + (s.mp3 ? " · MP3 320" : "")
-            + (s.stems == null ? "" : " · from " + s.stemCount() + " stems, " + (s.stemAuto ? "auto balance" : "own balance"))
+            + (s.stems == null ? "" : " · from " + s.stemCount() + " stems, " + (s.stemAuto ? "auto balance" : "own balance")
+                + (s.vocalTune != VocalTune.Mode.OFF ? ", vocal tune " + s.vocalTune.label.toLowerCase(Locale.ROOT) : ""))
             + (s.target != null ? " · tone from " + s.target.name : "");
     }
 
@@ -281,7 +285,7 @@ public final class MasterJob {
                     set = p.set; levels = p.levels; mute = p.mute; made = p.made;
                     if (p.note != null) options.stemNotes.add(p.note);
                 }
-                in = Stems.render(set, levels, rides, mute, options.cleanUp, dir, options.stemNotes, bar);
+                in = Stems.render(set, levels, rides, mute, options.cleanUp, s.vocalTune, dir, options.stemNotes, bar);
             } finally {
                 for (File f : made) f.delete();
             }

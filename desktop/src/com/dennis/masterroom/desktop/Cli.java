@@ -1,6 +1,7 @@
 package com.dennis.masterroom.desktop;
 
 import com.dennis.masterroom.engine.Target;
+import com.dennis.masterroom.engine.VocalTune;
 
 import java.io.File;
 import java.util.Locale;
@@ -8,7 +9,8 @@ import java.util.Locale;
 /**
  * Command line, for checks and batch use:
  *   "Master Room CLI.exe" --master song.wav [--style COUNTRY] [--level -14] [--out folder] [--commercial] [--no-cleanup] [--no-mp3]
- *   "Master Room CLI.exe" --master --stems vocals.wav drums.wav bass.wav other.wav [same options]   (or --stems stems.zip)
+ *   "Master Room CLI.exe" --master --stems vocals.wav drums.wav bass.wav other.wav [same options] [--vocal-tune natural]   (or --stems stems.zip)
+ *   "Master Room CLI.exe" --tune vocal.wav [--vocal-tune natural|firm|effect] [--out folder]   (a vocal on its own)
  * Stems use the auto balance, as the phone does unless adjusted by hand.
  */
 final class Cli {
@@ -17,6 +19,7 @@ final class Cli {
     static int run(String[] a) {
         MasterJob.Settings s = new MasterJob.Settings();
         java.util.List<File> stems = new java.util.ArrayList<>();
+        File tuneOnly = null;
         for (int i = 0; i < a.length; i++) {
             switch (a[i]) {
                 case "--master" -> { if (i + 1 < a.length && !a[i + 1].startsWith("--")) s.song = new File(a[++i]); }
@@ -27,8 +30,19 @@ final class Cli {
                 case "--commercial" -> s.commercial = true;
                 case "--no-cleanup" -> s.cleanUp = false;
                 case "--no-mp3" -> s.mp3 = false;
+                case "--vocal-tune" -> s.vocalTune = VocalTune.Mode.parse(a[++i]);
+                case "--tune" -> tuneOnly = new File(a[++i]);
                 default -> { }
             }
+        }
+        if (tuneOnly != null) {
+            try {
+                VocalTuneTool.Done d = VocalTuneTool.run(tuneOnly, s.vocalTune == VocalTune.Mode.OFF ? VocalTune.Mode.NATURAL : s.vocalTune, s.outRoot);
+                System.out.println("TUNE " + d.result.words());
+                System.out.println("TUNED " + (d.tuned == null ? "none" : d.tuned.getAbsolutePath()));
+                System.out.println("OUT " + d.folder.getAbsolutePath());
+                return 0;
+            } catch (Exception e) { System.err.println("FAILED " + e); return 1; }
         }
         StemFiles.Loaded loaded = null;
         if (!stems.isEmpty()) {
